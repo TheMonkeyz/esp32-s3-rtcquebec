@@ -31,3 +31,6 @@ snapshot_*.png
 _site/
 dist/
 version.txt
+
+# Claude Code worktrees (agents working on a branch): never part of the project
+.claude/worktrees/
