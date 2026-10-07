@@ -32,9 +32,12 @@
   .fav div { flex: 1; min-width: 0; }
   .fav small { display: block; color: var(--dim); font-size: 13px; }
   .fav button { width: auto; margin: 0; padding: 4px 10px; }
-  .row { display: flex; gap: 8px; }
+  .row { display: flex; gap: 8px; align-items: flex-end; }   /* a label on two lines (French) doesn't shift its field */
   .row > * { flex: 1; }
   .hint { color: var(--dim); font-size: 13px; margin-top: 6px; }
+  label.chk { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 15px; margin: 12px 0 4px; }
+  label.chk input { width: auto; flex: none; }
+  #scr-state { font-weight: 600; }
 </style>
 </head>
 <body>
@@ -64,6 +67,37 @@
       <select id="fav-dir"></select>
       <button id="fav-add" data-i18n="add">Add this stop</button>
     </div>
+  </section>
+
+  <section id="screen">
+    <h2 data-i18n="screen">Screen</h2>
+    <div id="scr-state" role="status"></div>
+    <div id="scr-level" class="hint"></div>
+    <label class="chk"><input type="checkbox" id="scr-en"> <span data-i18n="dim_quiet">Dim, then turn off, the screen when the room is quiet</span></label>
+    <div class="row">
+      <div>
+        <label for="scr-dim" data-i18n="dim_after">Dim after (quiet)</label>
+        <select id="scr-dim"></select>
+      </div>
+      <div>
+        <label for="scr-off" data-i18n="off_after">Turn off after (quiet in all)</label>
+        <select id="scr-off"></select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label for="scr-bright" data-i18n="bright">Brightness (%)</label>
+        <input id="scr-bright" type="number" inputmode="numeric" min="5" max="100">
+      </div>
+      <div>
+        <label for="scr-dimpct" data-i18n="dimmed">Dimmed (%)</label>
+        <input id="scr-dimpct" type="number" inputmode="numeric" min="1" max="100">
+      </div>
+    </div>
+    <label class="chk" id="scr-motion-box"><input type="checkbox" id="scr-motion"> <span data-i18n="motion_wake">Light up when the display is picked up or moved</span></label>
+    <button id="scr-save" data-i18n="save">Save</button>
+    <button id="scr-cal" class="secondary" data-i18n="calibrate">Measure the background noise (stay quiet 5 s)</button>
+    <div class="hint" data-i18n="cal_hint">Do it once where the display stays: the screen then wakes on noise louder than the room's.</div>
   </section>
 
   <section>
@@ -114,7 +148,18 @@ const I18N = {
     direction: 'Direction', add: 'Add this stop', remove: 'Remove', up: 'Move up', asking: 'Asking the RTC...',
     no_route: 'Route {r} doesn\'t exist.', not_served: 'Route {r} doesn\'t stop at {s} in that direction.',
     rtc_down: 'The RTC didn\'t answer. Try again in a moment.', bad_fav: 'Check the stop and route numbers.',
-    full: 'That\'s the most stops the display can show ({n}).', dup: 'That stop is already in the list.'
+    full: 'That\'s the most stops the display can show ({n}).', dup: 'That stop is already in the list.',
+    screen: 'Screen', dim_quiet: 'Dim, then turn off, the screen when the room is quiet', dim_after: 'Dim after (quiet)',
+    off_after: 'Turn off after (quiet in all)', bright: 'Brightness (%)', dimmed: 'Dimmed (%)',
+    motion_wake: 'Light up when the display is picked up or moved', save: 'Save',
+    calibrate: 'Measure the background noise (stay quiet 5 s)',
+    cal_hint: 'Do it once where the display stays: the screen then lights up on sounds louder than the room.',
+    st_active: 'Active', st_dim: 'Dimmed', st_off: 'Off', st_cal: 'Calibrating... {s} s',
+    no_mic: 'No microphone: the screen stays on', state_line: '{s} · brightness {p} %',
+    level: 'Sound {l} dB · lights up above {th} dB', cal_start: 'Stay quiet: measuring the background noise for 5 s.',
+    cal_na: 'Can\'t measure now: no microphone, or a measure is already running.',
+    off_longer: 'Turning off must come after dimming.', not_saved: 'Not saved.',
+    n_s: '{n} s', n_min: '{n} min', n_h: '{n} h'
   },
   fr: {
     title: 'Réglages', wifi: 'Réseau Wi-Fi', ssid: 'Nom du réseau', pass: 'Mot de passe', save_wifi: 'Enregistrer et redémarrer',
@@ -132,7 +177,18 @@ const I18N = {
     direction: 'Direction', add: 'Ajouter cet arrêt', remove: 'Retirer', up: 'Monter', asking: 'Interrogation du RTC...',
     no_route: 'Le parcours {r} n\'existe pas.', not_served: 'Le parcours {r} ne s\'arrête pas au {s} dans cette direction.',
     rtc_down: 'Le RTC n\'a pas répondu. Réessayez dans un moment.', bad_fav: 'Vérifiez les numéros d\'arrêt et de parcours.',
-    full: 'L\'écran affiche au plus {n} arrêts.', dup: 'Cet arrêt est déjà dans la liste.'
+    full: 'L\'écran affiche au plus {n} arrêts.', dup: 'Cet arrêt est déjà dans la liste.',
+    screen: 'Écran', dim_quiet: 'Tamiser puis éteindre l\'écran quand la pièce est calme', dim_after: 'Tamiser après (silence)',
+    off_after: 'Éteindre après (silence au total)', bright: 'Luminosité (%)', dimmed: 'Luminosité tamisée (%)',
+    motion_wake: 'Rallumer l\'écran quand on soulève ou déplace l\'appareil', save: 'Enregistrer',
+    calibrate: 'Mesurer le bruit de fond (silence 5 s)',
+    cal_hint: 'À faire une fois à l\'endroit où l\'appareil restera : l\'écran se rallume ensuite sur un son plus fort que la pièce.',
+    st_active: 'Allumé', st_dim: 'Tamisé', st_off: 'Éteint', st_cal: 'Mesure du bruit de fond... {s} s',
+    no_mic: 'Aucun microphone : l\'écran reste allumé', state_line: '{s} · luminosité {p} %',
+    level: 'Son {l} dB · se rallume au-dessus de {th} dB', cal_start: 'Gardez le silence : mesure du bruit de fond pendant 5 s.',
+    cal_na: 'Mesure impossible pour le moment : aucun microphone, ou une mesure est déjà en cours.',
+    off_longer: 'L\'écran doit s\'éteindre après avoir été tamisé.', not_saved: 'Non enregistré.',
+    n_s: '{n} s', n_min: '{n} min', n_h: '{n} h'
   }
 };
 let lang = 'en';
@@ -236,6 +292,7 @@ $('lang').onchange = async () => {
     lang = code;
     applyTexts();
     showFavs();
+    screenTexts();
     if (lastUpdate) showUpdate(lastUpdate);
     say(t('saved'));
   } catch (e) { if (e.message !== 'key') say(t('failed', { e: e.message }), true); }
@@ -337,12 +394,79 @@ $('fav-add').onclick = async () => {
   }
 };
 
+// ---- screen dimming: GET/POST /api/presence, POST /api/calibrate (presence.c on the display)
+const DIM_CHOICES = [120, 300, 600, 1800, 3600];            // seconds of quiet before dimming
+const OFF_CHOICES = [900, 1800, 3600, 7200, 10800];         // seconds of quiet in all before the screen goes off
+let screen = null, screenLoaded = false;
+const dur = s => s >= 3600 && s % 1800 === 0 ? t('n_h', { n: s / 3600 }) :
+                 s >= 60 && s % 30 === 0 ? t('n_min', { n: s / 60 }) : t('n_s', { n: Math.round(s) });
+function fillDur(sel, choices, v) {                         // the choices, and the saved value if it is another
+  const all = [...new Set(choices.concat(v ? [Math.round(v)] : []))].sort((a, b) => a - b);
+  sel.innerHTML = '';
+  for (const c of all) {
+    const o = document.createElement('option');
+    o.value = c; o.textContent = dur(c); sel.appendChild(o);
+  }
+  if (v) sel.value = Math.round(v);
+}
+
+function showScreen(p) {
+  screen = p;
+  const name = p.calibrating ? t('st_cal', { s: Math.ceil(p.calib_left_s) }) :
+               !p.mic_ok ? t('no_mic') : t('st_' + p.state);
+  $('scr-state').textContent = p.mic_ok ? t('state_line', { s: name, p: p.brightness }) : name;
+  $('scr-level').textContent = p.mic_ok ? t('level', { l: Math.round(p.level_db), th: Math.round(p.threshold_db) }) : '';
+  $('scr-cal').disabled = !p.mic_ok || p.calibrating;
+  $('scr-motion-box').hidden = p.imu_ok === false;          // no motion sensor: no option
+  if (!screenLoaded) {
+    screenLoaded = true;
+    $('scr-en').checked = p.enabled;
+    fillDur($('scr-dim'), DIM_CHOICES, p.dim_s);
+    fillDur($('scr-off'), OFF_CHOICES, p.dim_s + p.off_s);
+    $('scr-bright').value = p.bright_pct;
+    $('scr-dimpct').value = p.dim_pct;
+    $('scr-motion').checked = !!p.motion_wake;
+  }
+}
+function screenTexts() {                                    // the language changed: same choices, new words
+  fillDur($('scr-dim'), DIM_CHOICES, +$('scr-dim').value);
+  fillDur($('scr-off'), OFF_CHOICES, +$('scr-off').value);
+  if (screen) showScreen(screen);
+}
+
+$('scr-save').onclick = async () => {
+  const dim = +$('scr-dim').value, offTotal = +$('scr-off').value;
+  if (!(offTotal > dim)) { say(t('off_longer'), true); return; }
+  const body = { enabled: $('scr-en').checked, dim_s: dim, off_s: offTotal - dim, bright_pct: +$('scr-bright').value,
+                 dim_pct: +$('scr-dimpct').value, motion_wake: $('scr-motion').checked };
+  try {
+    const p = await api('/api/presence', body);
+    say(p.ok ? t('saved') : t('not_saved'), !p.ok);
+    screenLoaded = false;
+    showScreen(p);
+  } catch (e) { if (e.message !== 'key') say(t('failed', { e: e.message }), true); }
+};
+
+$('scr-cal').onclick = async () => {
+  try {
+    const p = await api('/api/calibrate', { seconds: 5 });
+    if (!p.ok) { say(t('cal_na'), true); return; }
+    say(t('cal_start'));
+    showScreen(p);
+  } catch (e) { if (e.message !== 'key') say(t('failed', { e: e.message }), true); }
+};
+
+async function pollScreen() {
+  try { showScreen(await api('/api/presence')); } catch (e) {}
+  setTimeout(pollScreen, screen && screen.calibrating ? 1000 : 3000);
+}
+
 async function poll() {
   try { showUpdate(await api('/api/update')); } catch (e) {}
   setTimeout(poll, lastUpdate && lastUpdate.state === 'downloading' ? 1000 : 5000);
 }
 
-loadInfo().then(() => { loadFavs().catch(() => {}); scan(); poll(); }).catch(e => say(t('failed', { e: e.message }), true));
+loadInfo().then(() => { loadFavs().catch(() => {}); pollScreen(); scan(); poll(); }).catch(e => say(t('failed', { e: e.message }), true));
 </script>
 </body>
 </html>

@@ -8,6 +8,12 @@ How to write an entry: add a `## vX.Y.Z - YYYY-MM-DD` section at the top **befor
 `- ` line per change, written for the person holding the display. Release candidates get their own
 `## vX.Y.Z-rc.N - YYYY-MM-DD` section, shown only to Beta users; the final release's section lists everything again.
 
+## v0.3.0-rc.1 - 2026-10-07
+- The screen dims when the room has been quiet for 10 minutes and turns off after an hour; it lights up again when there is sound for a few seconds, when you pick up or move the display, or when you touch it.
+- The touch that lights up a dark screen does only that: it doesn't open a map or change the page.
+- New "Screen" section on the settings page: turn dimming on or off, choose when it dims and turns off, the brightness and the dimmed level, waking on pick-up; it shows the screen's state live.
+- "Measure the background noise" on the settings page: stay quiet 5 seconds where the display sits, so it knows what counts as sound in your room.
+
 ## v0.2.1-rc.1 - 2026-10-07
 - The map shows the route's path in blue, and the buses as small bus icons.
 - Zoom the map: swipe down to zoom in, up to zoom out.

@@ -12,6 +12,7 @@ describe here only how this app uses them. -->
 | Display | CO5300 AMOLED 466×466 round, QSPI, RGB565 | CS 12, CLK 38, D0–D3 4/5/6/7, RST 39; column offset +6 |
 | Touch | CST9217, I2C `0x5A` | SDA 15, SCL 14, RST 40 |
 | Motion sensor | QMI8658, I2C `0x6B` (shared bus) | SDA 15, SCL 14 |
+| Microphones | ES7210 (2 mics), control on the shared I2C bus (`0x40`, 8-bit `0x80`), data I2S_NUM_0 | MCLK 42, BCLK 9, WS 45, DIN 10; DOUT 8 (ES8311 speaker, unused) |
 | USB | USB serial/JTAG (COM5 on the dev PC) | |
 
 Board support: `boards/ws_amoled175/board/` (espforge).
@@ -74,6 +75,41 @@ first stop; swipe right for the system page. Long-press anywhere: Wi-Fi setup (e
 
 Every second the `tick` timer refreshes every stop page, the ones not shown too (a swipe shows a neighbour's picture
 rendered in the background); `set_text` / `set_color` change a label only when it differs.
+
+## Screen dimming
+
+`presence.c` (ported from weather_amoled's, 2026-10-07; its logic and limits unchanged) and `presence_sm.c` (the
+state machine, pure C, host test `tests/host/test_presence.c`). Started in `app_main` right after `board_init()`
+(it uses the board's I2C bus, `board_i2c_bus()`). Task "presence", core 0, priority 2, 4 KB stack.
+
+- **Microphones**: ES7210 through espressif/esp_codec_dev 1.5.11 (pinned in `main/idf_component.yml`), 16 kHz
+  stereo 16-bit, gain 30 dB; both I2S directions opened on I2S_NUM_0 (the TX side for a future speaker). Every 100 ms
+  the RMS level of the last 100 ms in dBFS. A failed read counts as quiet and is counted in the 5 s log line
+  (`presence: level ... dB (threshold ...)`). No microphone: the state stays ACTIVE, the page says so.
+- **States**: ACTIVE --quiet `dim_s`--> DIM --quiet `off_s` more--> OFF. "Loud" = level above baseline + margin
+  (10 dB). DIM/OFF wake on a sustained-noise score: +0.1 per loud tick, -0.05 per quiet one, wake at `wake_s`
+  (3 s): a single bang doesn't wake it. While DIM a short noise restarts the off countdown. Defaults ("Normal"):
+  dim after 10 min, off after 60 min of quiet, 100 % / 15 %.
+- **Motion** (QMI8658, `imu.h`): distance of the acceleration from a slow average of it (rest position), above
+  0.10 g = moved: wakes DIM/OFF and counts as activity. The first second of samples is skipped (junk).
+- **Touch**: a finger down in the last 150 ms (`touch_idle_ms()`) is activity / wakes, like motion. **The touch that
+  wakes an OFF screen does nothing else**: main.c gives the board `touch_set_press_filter(presence_touch)`; the
+  board's touch read (`touch.c`) asks it when a finger comes down, and while the screen was OFF that whole press
+  (to the lift) reaches neither LVGL nor forge_lvgl's read hook (slide.c, which owns the pager drags): no tap (map),
+  no swipe, no long-press (Wi-Fi setup). `presence_touch()` wakes at once (it doesn't wait for the 100 ms tick). A
+  touch on a DIMMED screen wakes it and acts as usual (the picture is visible). The test console's simulated finger
+  goes through the same path.
+- **Brightness**: `display_brightness()` under `display_lock()`, a fade of 10 % per 100 ms (~1 s full to off). The
+  dimmed level is capped at the full one where it is used. LVGL keeps drawing while the screen is off.
+- **Calibration** (`POST /api/calibrate`): 5 s of levels, baseline = their 90th percentile, saved.
+- **NVS** namespace `presence`, typed keys (not weather_amoled's `cfg` blob: a blob that changes size is dropped
+  on an update): `enabled` u8, `margin` u16 (0.1 dB), `wake` u16 (0.1 s), `dim` u32 (s), `off` u32 (s, after
+  dimming), `bright` u8 (%), `dim_pct` u8 (%), `baseline` i16 (0.1 dBFS), `motion` u8, `motion_mg` u16 (mg,
+  20..500). A missing key keeps its default; every value loaded is clamped (`presence_clamp_cfg`).
+- **Emulator**: `web/emu/emu_presence.c` stands in for presence.c: always ACTIVE, `mic_ok`/`imu_ok` false (the
+  settings page says "No microphone"), settings kept for the session; the press filter exists in `emu_touch.c` too.
+- **To check on the device after touching it**: the 5 s log lines' levels in a quiet and a noisy room, a
+  calibration, the fades, waking by voice / pick-up / touch, and that the waking touch did nothing else.
 
 ## Data sources
 
@@ -148,6 +184,9 @@ Routes added by `main.c` (on top of docs/PROTOCOL.md §4):
 | `POST /api/favs` | yes (none on the setup network) | the whole list `{"favs":[{"stop","route","dir"}]}` in page order; a favourite not already in the list is checked with RTC first. `{"ok":true}` or `{"ok":false,"bad":<index>,"why":"invalid"\|"not_served"\|"rtc"\|"save"}` |
 | `POST /api/route` | yes (none on the setup network) | `{"route":"800"}` -> `{"ok":true,"route","name","dirs":[{"code","name"}x2]}` or `{"ok":false,"why":"no_route"\|"rtc"}` |
 | `POST /api/settings` | yes | `{"lang":"en"\|"fr"}` (espforge's starter) |
+| `GET /api/presence` | no | screen dimming (weather_amoled's shape plus `ok`): `enabled, margin_db, wake_s, dim_s, off_s, bright_pct, dim_pct, baseline_db, level_db, threshold_db, state ("active"\|"dim"\|"off"), wake_progress, quiet_s, calibrating, calib_left_s, mic_ok, brightness, imu_ok, motion_g, motion_wake, motion_thr` |
+| `POST /api/presence` | yes | any of `enabled, margin_db, wake_s, dim_s, off_s` (after dimming)`, bright_pct, dim_pct, motion_wake, motion_thr`: saved, then GET's answer (`"ok":false`: not saved) |
+| `POST /api/calibrate` | yes | `{"seconds":5}`: GET's answer with `calibrating:true`, or `{"ok":false,"why":"no_mic"\|"busy"}` |
 
 Refusals answer 200 with `ok:false` (a 404 / 502 made the browser log errors the page tests count as failures).
 The lookups run in the deps task (`deps_lookup_route`, `deps_check_fav`); the HTTP handler waits up to 20 s for it to
@@ -156,6 +195,11 @@ take the job, then for the end (the job is on the handler's stack).
 The page's "My stops" section: the list (move up, remove), then stop number + route -> "Find directions" -> pick a
 direction -> "Add this stop". Tested against the mock (`tools/webtest/tests/stops.spec.js`; the mock knows routes
 800 and 11, stops 1025 and 1005 on 800 direction 0, 1026 on direction 1; route 999 = RTC unreachable).
+
+The page's "Screen" section: dimming on/off, dim after / turn off after (2 min..1 h / 15 min..3 h, a saved value
+outside the lists is added), brightness and dimmed level, wake on pick-up, the live state (polled every 3 s, 1 s
+while calibrating) and "Measure the background noise". Tested against the mock (`tools/webtest/tests/screen.spec.js`;
+`POST /__presence` sets the mock's state).
 
 NVS namespace `favs`: `n` (u8) and `f0`..`f7` strings `"<stop>/<route>/<dir>"` (`favs.c`; typed keys, not a blob).
 
