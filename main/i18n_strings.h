@@ -6,10 +6,23 @@
 // round screen wraps it badly; give long lines explicit \n breaks.
 
 // Screens
-X(T_HELLO,          "Hello",                       "Bonjour")
-X(T_HELLO_SUB,      "RTC Québec",                  "RTC Québec")
-X(T_SWIPE_HINT,     "Swipe left: system\nLong-press: Wi-Fi setup",
-                    "Glissez à gauche : système\nAppuyez longuement : Wi-Fi")
+// A stop's departures (one page per favourite). Minutes count down from the departure times (ui.c).
+X(T_DEP_MIN,        "%d min",                      "%d min")
+X(T_DEP_NOW,        "< 1 min",                     "< 1 min")
+X(T_DEP_LIVE,       "Real time",                   "Temps réel")
+X(T_DEP_SCHED,      "Scheduled",                   "Horaire prévu")
+X(T_DEP_CANCELLED,  "Cancelled",                   "Annulé")
+X(T_DEP_NONE,       "No more departures today",    "Plus de départs aujourd'hui")
+X(T_DEP_LOADING,    "Loading...",                  "Chargement...")
+X(T_DEP_UPDATED,    "Updated at %s",               "Mis à jour à %s")
+X(T_DEP_OFFLINE,    "Can't reach the RTC",         "Impossible de joindre le RTC")
+X(T_DEP_NOT_FOUND,  "Route %s doesn't stop here\nin this direction",
+                    "Le parcours %s ne s'arrête pas ici\ndans cette direction")
+X(T_DEP_NOT_SERVED, "Stop not served for now",     "Arrêt non desservi pour le moment")
+X(T_DEP_DROP_OFF,   "Drop-off only",               "Descente seulement")
+X(T_NO_STOPS,       "No stops yet",                "Aucun arrêt")
+X(T_NO_STOPS_HOW,   "Add your stops on the\nsettings page: swipe right,\nthen scan the code",
+                    "Ajoutez vos arrêts dans\nles réglages : glissez à droite,\npuis balayez le code")
 X(T_SYSTEM,         "System",                      "Système")
 X(T_SYS_VERSION,    "Version %s",                  "Version %s")
 X(T_SYS_WIFI,       "Wi-Fi %s  ·  %d dBm",         "Wi-Fi %s  ·  %d dBm")

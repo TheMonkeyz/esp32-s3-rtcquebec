@@ -1,5 +1,5 @@
-"""The starter app's own tests (main/: the hello and system screens, setup on a long-press). Replace or extend them
-with your app's: same registry (@test from board.py), same ctx as core_suites.py.
+"""The app's own tests (main/: the system page and the stop pages, setup on a long-press). Same registry (@test from
+board.py), same ctx as core_suites.py.
 
     APP_ORDER       the app's suites, run after the core start-up checks (harness.py)
     APP_WATCH       log lines that aren't failures but must not go unseen: (regex, what), counted per test
@@ -18,7 +18,9 @@ APP_WATCH = [
 ]
 METRIC_SUITES = [('swipe_', 'perf'), ('setup_page_', 'navigation'), ('easy_connect_', 'navigation')]
 
-HOME, NEXT = 'hello', 'system'                         # the starter's two pages, side by side: hello | system
+# The pager: system | stop | further stops. The navigation tests expect at most one favourite stop on the test board
+# (the right end bounces on "stop"); with none, "stop" says how to add some.
+HOME, NEXT = 'system', 'stop'
 
 
 def go_home(ctx):
@@ -57,7 +59,7 @@ def quick_swipes(ctx):
     drags = [l for l in ctx.log.lines()[at:] if 'slide: drag: first frame' in l]
     check(len(drags) == 2, f'two quick swipes made {len(drags)} drag(s); the second was taken for the first')
     # Where the second one ends is timing: it starts when the first's release animation ends, by then the simulated
-    # finger has mostly moved on ("samples 1", "back" once on v0.1.1-rc.1, on to hello in the run before)
+    # finger has mostly moved on ("samples 1", "back" once on v0.1.1-rc.1, on to the other page in the run before)
     second = 'back' if ' back |' in drags[1] else 'on'
     ctx.note(f'two swipes 150 ms apart: 2 drags, the second went {second}; now on {b.screen()}')
     go_home(ctx)
@@ -81,7 +83,7 @@ def long_press_opens_setup(ctx):
 
 @test('navigation')
 def setup_pages_slide(ctx):
-    """Setup's two pages (setup network | Easy Connect) follow the finger like hello | system, and the Easy Connect QR
+    """Setup's two pages (setup network | Easy Connect) follow the finger like system | stop, and the Easy Connect QR
     code shows up quickly. User reports, October 4: the setup pages only switched after the swipe (and froze while
     the radio switched), and the QR code took ~2 s (a channel scan the connected device doesn't need)."""
     b = ctx.board

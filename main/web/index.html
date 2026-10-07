@@ -26,6 +26,15 @@
   #msg.bad { color: var(--bad); }
   #update-notes { white-space: pre-wrap; color: var(--dim); font-size: 14px; margin-top: 8px; }
   [hidden] { display: none !important; }
+  .fav { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #222932; cursor: default; }
+  .fav:hover { background: none; }
+  .route { background: var(--accent); color: #00172e; font-weight: 700; border-radius: 6px; padding: 2px 8px; }
+  .fav div { flex: 1; min-width: 0; }
+  .fav small { display: block; color: var(--dim); font-size: 13px; }
+  .fav button { width: auto; margin: 0; padding: 4px 10px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .hint { color: var(--dim); font-size: 13px; margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -33,6 +42,29 @@
   <h1 data-i18n="title">Settings</h1>
   <div id="version"></div>
   <div id="msg" role="status"></div>
+
+  <section>
+    <h2 data-i18n="stops">My stops</h2>
+    <ul id="fav-list"></ul>
+    <div id="fav-none" class="hint" data-i18n="no_stops" hidden>No stops yet.</div>
+    <div class="row">
+      <div>
+        <label for="fav-stop" data-i18n="stop_no">Stop number</label>
+        <input id="fav-stop" inputmode="numeric" maxlength="6" autocomplete="off">
+      </div>
+      <div>
+        <label for="fav-route" data-i18n="route_no">Route</label>
+        <input id="fav-route" maxlength="5" autocomplete="off">
+      </div>
+    </div>
+    <div class="hint" data-i18n="stop_hint">The stop number is on the sign at the stop.</div>
+    <button id="fav-find" class="secondary" data-i18n="find">Find directions</button>
+    <div id="fav-dir-box" hidden>
+      <label for="fav-dir" data-i18n="direction">Direction</label>
+      <select id="fav-dir"></select>
+      <button id="fav-add" data-i18n="add">Add this stop</button>
+    </div>
+  </section>
 
   <section>
     <h2 data-i18n="wifi">Wi-Fi network</h2>
@@ -76,7 +108,13 @@ const I18N = {
     saved_wifi: 'Saved. The device restarts and joins {s}.', bad_wifi: 'Check the network name and password.',
     no_key: 'Open this page by scanning the QR code on the device (System screen): changes need its key.',
     bad_key: 'The key was refused: scan the QR code on the device again.', failed: 'That didn\'t work ({e}).',
-    scanning: 'Looking for networks...', saved: 'Saved.'
+    scanning: 'Looking for networks...', saved: 'Saved.',
+    stops: 'My stops', no_stops: 'No stops yet: add one below.', stop_no: 'Stop number', route_no: 'Route',
+    stop_hint: 'The stop number is on the sign at the stop (4 digits).', find: 'Find directions',
+    direction: 'Direction', add: 'Add this stop', remove: 'Remove', up: 'Move up', asking: 'Asking the RTC...',
+    no_route: 'Route {r} doesn\'t exist.', not_served: 'Route {r} doesn\'t stop at {s} in that direction.',
+    rtc_down: 'The RTC didn\'t answer. Try again in a moment.', bad_fav: 'Check the stop and route numbers.',
+    full: 'That\'s the most stops the display can show ({n}).', dup: 'That stop is already in the list.'
   },
   fr: {
     title: 'Réglages', wifi: 'Réseau Wi-Fi', ssid: 'Nom du réseau', pass: 'Mot de passe', save_wifi: 'Enregistrer et redémarrer',
@@ -88,7 +126,13 @@ const I18N = {
     saved_wifi: 'Enregistré. L\'appareil redémarre et se connecte à {s}.', bad_wifi: 'Vérifiez le nom du réseau et le mot de passe.',
     no_key: 'Ouvrez cette page en balayant le code QR de l\'appareil (écran Système) : les changements exigent sa clé.',
     bad_key: 'La clé a été refusée : balayez de nouveau le code QR de l\'appareil.', failed: 'Échec ({e}).',
-    scanning: 'Recherche des réseaux...', saved: 'Enregistré.'
+    scanning: 'Recherche des réseaux...', saved: 'Enregistré.',
+    stops: 'Mes arrêts', no_stops: 'Aucun arrêt : ajoutez-en un ci-dessous.', stop_no: 'Numéro d\'arrêt', route_no: 'Parcours',
+    stop_hint: 'Le numéro d\'arrêt est inscrit sur le panneau de l\'arrêt (4 chiffres).', find: 'Trouver les directions',
+    direction: 'Direction', add: 'Ajouter cet arrêt', remove: 'Retirer', up: 'Monter', asking: 'Interrogation du RTC...',
+    no_route: 'Le parcours {r} n\'existe pas.', not_served: 'Le parcours {r} ne s\'arrête pas au {s} dans cette direction.',
+    rtc_down: 'Le RTC n\'a pas répondu. Réessayez dans un moment.', bad_fav: 'Vérifiez les numéros d\'arrêt et de parcours.',
+    full: 'L\'écran affiche au plus {n} arrêts.', dup: 'Cet arrêt est déjà dans la liste.'
   }
 };
 let lang = 'en';
@@ -191,6 +235,7 @@ $('lang').onchange = async () => {
     await api('/api/settings', { lang: code });
     lang = code;
     applyTexts();
+    showFavs();
     if (lastUpdate) showUpdate(lastUpdate);
     say(t('saved'));
   } catch (e) { if (e.message !== 'key') say(t('failed', { e: e.message }), true); }
@@ -204,12 +249,100 @@ $('update-check').onclick = () => post_update({ action: 'check' });
 $('update-install').onclick = () => post_update({ action: 'install' });
 $('update-channel').onchange = () => post_update({ channel: $('update-channel').value });
 
+
+// ---- favourite stops: GET /api/favs, POST /api/route (directions), POST /api/favs (the whole list)
+let favs = [], favMax = 8, found = null;
+const favKey = f => f.stop + '/' + f.route + '/' + f.dir;
+
+function showFavs() {
+  const list = $('fav-list');
+  list.innerHTML = '';
+  $('fav-none').hidden = favs.length > 0;
+  favs.forEach((f, i) => {
+    const li = document.createElement('li');
+    li.className = 'fav';
+    const r = document.createElement('span');
+    r.className = 'route'; r.textContent = f.route;
+    const d = document.createElement('div');
+    d.textContent = f.direction || (t('direction') + ' ' + f.dir);
+    const s = document.createElement('small');
+    s.textContent = (f.stop_name ? f.stop_name + ' · ' : '') + f.stop;
+    d.appendChild(s);
+    li.append(r, d);
+    if (i > 0) {
+      const up = document.createElement('button');
+      up.className = 'secondary'; up.textContent = '↑'; up.title = t('up');
+      up.onclick = () => { const x = favs.slice(); [x[i - 1], x[i]] = [x[i], x[i - 1]]; saveFavs(x); };
+      li.appendChild(up);
+    }
+    const rm = document.createElement('button');
+    rm.className = 'secondary'; rm.textContent = '✕'; rm.title = t('remove');
+    rm.onclick = () => saveFavs(favs.filter((_, k) => k !== i));
+    li.appendChild(rm);
+    list.appendChild(li);
+  });
+}
+
+async function loadFavs() {
+  const j = await api('/api/favs');
+  favs = j.favs || []; favMax = j.max || 8;
+  showFavs();
+}
+
+async function saveFavs(list) {
+  say(t('asking'));
+  try {
+    const j = await api('/api/favs', { favs: list.map(f => ({ stop: f.stop, route: f.route, dir: f.dir })) });
+    if (!j.ok) {
+      const f = list[j.bad] || {};
+      say(j.why === 'not_served' ? t('not_served', { r: f.route, s: f.stop }) :
+          j.why === 'rtc' ? t('rtc_down') : t('bad_fav'), true);
+      return false;
+    }
+    say(t('saved'));
+    await loadFavs();
+    setTimeout(loadFavs, 4000);          // names arrive with the first fetch
+    return true;
+  } catch (e) { if (e.message !== 'key') say(t('failed', { e: e.message }), true); return false; }
+}
+
+$('fav-find').onclick = async () => {
+  const route = $('fav-route').value.trim(), stop = $('fav-stop').value.trim();
+  $('fav-dir-box').hidden = true; found = null;
+  if (!/^\d{1,6}$/.test(stop) || !/^[0-9A-Za-z]{1,5}$/.test(route)) { say(t('bad_fav'), true); return; }
+  say(t('asking'));
+  try {
+    const j = await api('/api/route', { route });
+    if (!j.ok) { say(j.why === 'no_route' ? t('no_route', { r: route }) : t('rtc_down'), true); return; }
+    found = j;
+    const sel = $('fav-dir');
+    sel.innerHTML = '';
+    for (const d of found.dirs) {
+      const o = document.createElement('option');
+      o.value = d.code; o.textContent = d.name; sel.appendChild(o);
+    }
+    $('fav-dir-box').hidden = false;
+    say('');
+  } catch (e) { if (e.message !== 'key') say(t('failed', { e: e.message }), true); }
+};
+
+$('fav-add').onclick = async () => {
+  if (!found) return;
+  const f = { stop: $('fav-stop').value.trim(), route: found.route, dir: $('fav-dir').value };
+  if (favs.length >= favMax) { say(t('full', { n: favMax }), true); return; }
+  if (favs.some(x => favKey(x) === favKey(f))) { say(t('dup'), true); return; }
+  if (await saveFavs(favs.concat([f]))) {
+    $('fav-dir-box').hidden = true; found = null;
+    $('fav-stop').value = ''; $('fav-route').value = '';
+  }
+};
+
 async function poll() {
   try { showUpdate(await api('/api/update')); } catch (e) {}
   setTimeout(poll, lastUpdate && lastUpdate.state === 'downloading' ? 1000 : 5000);
 }
 
-loadInfo().then(() => { scan(); poll(); }).catch(e => say(t('failed', { e: e.message }), true));
+loadInfo().then(() => { loadFavs().catch(() => {}); scan(); poll(); }).catch(e => say(t('failed', { e: e.message }), true));
 </script>
 </body>
 </html>

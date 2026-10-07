@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Save a screen of the display as a PNG, rendered by the device itself (GET /api/snapshot, docs/PROTOCOL.md §4).
 
-    python tools/snapshot.py hello                  -> snapshot_hello.png
+    python tools/snapshot.py stop                   -> snapshot_stop.png
     python tools/snapshot.py system out.png --ip 192.168.1.50
 
 Screens: the names in forge.json "screens" (the test console's "screen" command lists the current one). The device

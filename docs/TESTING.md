@@ -84,7 +84,7 @@ own with `testcon_register`.
 the area outside a round panel tinted red, so anything the circle cuts off stands out.
 
 ```bash
-python tools/snapshot.py hello                  # -> snapshot_hello.png (address: .devloop/ip)
+python tools/snapshot.py stop                   # -> snapshot_stop.png  (address: .devloop/ip)
 python tools/snapshot.py system out.png --ip <ip>
 python tools/snapshot.py setup --key <key>      # else $FORGE_KEY (forge.json key_env), else .devloop/key
 ```

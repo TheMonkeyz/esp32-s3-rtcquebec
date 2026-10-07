@@ -98,3 +98,12 @@ Add each preference the user states (gestures, wording, timing, look) with the d
 
 Board facts, API quirks, numbers measured on this hardware, test recipes: anything a future session would otherwise
 rediscover.
+
+- **Real stops for tests** (2026-10-06): route 800 direction 0 (Colline Parlementaire) stops at 1025 (St-Dominique);
+  direction 1 (Terminus Chute-Montmorency) at 1105 (St-Dominique), **not** 1026. To find more: download the static
+  GTFS (docs/ARCHITECTURE.md, Data sources), take one trip of `route_id` `1-<route>` and `direction_id` from
+  `trips.txt`, its stops from `stop_times.txt`, their `stop_code` from `stops.txt`. Never guess stop numbers at the
+  live API: each guess is a request to RTC.
+- **Adding favourites without the page**: `Board.api('/api/favs', {'favs': [...]})` from tools/harness (it knows the
+  key); then `snapshot.py stop`.
+- **forge_lvgl `pager_set_count()`** was added here (2026-10-06): port it to espforge.

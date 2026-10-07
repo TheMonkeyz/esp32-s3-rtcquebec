@@ -1,5 +1,4 @@
-// The starter app's screens (see ui.h). Small on purpose: it shows the framework's paths (pager, screen registry,
-// snapshots, simulated touch, Wi-Fi setup, updates, two languages) and is the part a new project replaces.
+// The screens (see ui.h): the favourite stops' departures and the system page in one pager, Wi-Fi setup, messages.
 #include "ui.h"
 #include <stdio.h>
 #include <string.h>
@@ -21,6 +20,7 @@
 #include "net.h"
 #include "web.h"
 #include "app_text.h"
+#include "departures.h"
 
 static const char *TAG = "ui";
 
@@ -28,13 +28,15 @@ static const char *TAG = "ui";
 #define C_TEXT   lv_color_hex(0xF2F4F7)
 #define C_DIM    lv_color_hex(0x8B95A1)
 #define C_ACCENT lv_color_hex(0x4DA3FF)
+#define C_LIVE   lv_color_hex(0x5BD68A)       // a real-time departure
+#define C_BAD    lv_color_hex(0xFF6B6B)
 
 extern const uint8_t ttf_start[] asm("_binary_montserrat_ttf_start");
 extern const uint8_t ttf_end[]   asm("_binary_montserrat_ttf_end");
 
 static lv_font_t *f_big, *f_mid, *f_small;
 static lv_obj_t *scr_main, *pager, *scr_msg, *scr_setup;
-static lv_obj_t *h_title, *h_clock, *h_date, *h_sub, *h_hint;
+static int n_favs;                       // favourite pages shown (pages 1..n_favs); 0: page 1 says how to add some
 static lv_obj_t *s_title, *s_lines, *s_qr, *s_scan;
 static lv_obj_t *m_title, *m_body;
 static ota_status_t ota_st;              // last forge_ota status (copied under the display lock)
@@ -92,7 +94,7 @@ static void long_pressed(lv_event_t *e)
     ui_wifi_setup(NULL);
 }
 
-/* ---------- hello and system pages ---------- */
+/* ---------- system page ---------- */
 
 static void fmt_uptime(char *out, int n)
 {
@@ -120,26 +122,6 @@ static void update_line(char *out, int n)
     }
     default:              snprintf(out, n, "%s", tr(T_UPD_IDLE));
     }
-}
-
-static void hello_refresh(void)
-{
-    time_t now = time(NULL);
-    struct tm tm;
-    localtime_r(&now, &tm);
-    char buf[64];
-    if (tm.tm_year > 120) {                               // the clock is set (SNTP)
-        snprintf(buf, sizeof(buf), "%02d:%02d", tm.tm_hour, tm.tm_min);
-        set_text(h_clock, buf);
-        tr_date_long(&tm, buf, sizeof(buf));
-        set_text(h_date, buf);
-    } else {
-        set_text(h_clock, "--:--");
-        set_text(h_date, "");
-    }
-    set_text(h_title, tr(T_HELLO));
-    set_text(h_sub, tr(T_HELLO_SUB));
-    set_text(h_hint, tr(T_SWIPE_HINT));
 }
 
 static void system_refresh(void)
@@ -184,43 +166,244 @@ static void system_refresh(void)
     }
 }
 
-// Every second, both pages: the one not shown too, because a swipe shows a picture of it rendered in the background
-// (slide.c, refreshed every 2 s): with its texts updated only when shown, a swipe showed stale ones for a moment
-// ("Wi-Fi offline" after a restart). Changing an off-screen label costs no redraw.
+/* ---------- stop pages ----------
+ * One page per favourite: the route and its direction, the stop, the next departure big (minutes, real time or
+ * scheduled), the three after it, and how fresh it is. Minutes count down from the departure times between fetches
+ * (departures.c fetches the page on view every 30 s). */
+
+typedef struct {
+    lv_obj_t *clock, *badge, *route, *dir, *stop, *big, *kind, *next[3], *status;
+} stop_page_t;
+static stop_page_t sp[FAVS_MAX];
+static lv_obj_t *empty_title, *empty_how;     // page 1 without favourites
+
+static lv_obj_t *page_of(int i) { return pager_page(pager, 1 + i); }
+
+static void set_color(lv_obj_t *l, lv_color_t c)
+{
+    if (!lv_color_eq(lv_obj_get_style_text_color(l, 0), c)) lv_obj_set_style_text_color(l, c, 0);
+}
+
+static void set_hidden(lv_obj_t *o, bool hide)
+{
+    if (hide != lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) {
+        if (hide) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void set_strike(lv_obj_t *l, bool on)
+{
+    lv_text_decor_t d = on ? LV_TEXT_DECOR_STRIKETHROUGH : LV_TEXT_DECOR_NONE;
+    if (lv_obj_get_style_text_decor(l, 0) != d) lv_obj_set_style_text_decor(l, d, 0);
+}
+
+static void hhmm(time_t t, char *out, int n)
+{
+    struct tm tm;
+    localtime_r(&t, &tm);
+    snprintf(out, n, "%02d:%02d", tm.tm_hour, tm.tm_min);
+}
+
+// "16 min", "< 1 min", or the time itself an hour or more away ("23:45")
+static void when(time_t dep, time_t now, char *out, int n)
+{
+    long s = (long)(dep - now);
+    if (s >= 3600) hhmm(dep, out, n);
+    else if (s < 60) snprintf(out, n, "%s", tr(T_DEP_NOW));
+    else snprintf(out, n, tr(T_DEP_MIN), (int)(s / 60));
+}
+
+static void stop_refresh(int i)
+{
+    stop_page_t *p = &sp[i];
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    char buf[96];
+    bool clock_set = tm.tm_year > 120;
+    if (clock_set) hhmm(now, buf, sizeof(buf));
+    set_text(p->clock, clock_set ? buf : "");
+
+    dep_entry_t e;
+    if (!deps_get(i, &e)) return;
+    const rtc_board_t *b = &e.board;
+    set_text(p->route, e.fav.route);
+    set_text(p->dir, e.state == DEP_OK ? b->direction : "");
+    if (e.state == DEP_OK) {
+        char name[64];
+        textfit(b->stop_name, name, sizeof(name));
+        snprintf(buf, sizeof(buf), "%s  ·  %s", name, e.fav.stop);
+    } else snprintf(buf, sizeof(buf), "%s", e.fav.stop);
+    set_text(p->stop, buf);
+
+    // The departures still ahead (one that left more than 30 s ago is gone; the next fetch drops it anyway)
+    const rtc_dep_t *d[RTC_DEPS_MAX];
+    int nd = 0;
+    if (e.state == DEP_OK && clock_set)
+        for (int k = 0; k < b->n; k++) if (b->dep[k].depart > now - 30) d[nd++] = &b->dep[k];
+    // Older than 10 min (offline for a while): the times may be wrong, show none rather than stale ones
+    bool stale = e.state == DEP_OK && now - e.fetched > 10 * 60;
+    if (stale) nd = 0;
+
+    if (nd > 0) {
+        when(d[0]->depart, now, buf, sizeof(buf));
+        set_text(p->big, buf);
+        set_strike(p->big, d[0]->cancelled);
+        set_text(p->kind, tr(d[0]->cancelled ? T_DEP_CANCELLED : d[0]->live ? T_DEP_LIVE : T_DEP_SCHED));
+        set_color(p->kind, d[0]->cancelled ? C_BAD : d[0]->live ? C_LIVE : C_DIM);
+    } else {
+        set_text(p->big, "--");
+        set_strike(p->big, false);
+        bool none = e.state == DEP_OK && !stale && clock_set && b->n == 0;
+        set_text(p->kind, none ? tr(T_DEP_NONE) : "");
+        set_color(p->kind, C_DIM);
+    }
+    for (int k = 0; k < 3; k++) {
+        const rtc_dep_t *x = k + 1 < nd ? d[k + 1] : NULL;
+        if (x) when(x->depart, now, buf, sizeof(buf));
+        set_text(p->next[k], x ? buf : "");
+        if (x) set_color(p->next[k], x->cancelled ? C_BAD : x->live ? C_LIVE : C_DIM);
+        set_strike(p->next[k], x && x->cancelled);
+    }
+
+    // The line at the bottom: what's wrong, else how fresh it is
+    lv_color_t sc = C_DIM;
+    if (e.state == DEP_NOT_FOUND) { snprintf(buf, sizeof(buf), tr(T_DEP_NOT_FOUND), e.fav.route); sc = C_BAD; }
+    else if (e.state == DEP_WAITING) {
+        snprintf(buf, sizeof(buf), "%s", e.failing ? tr(T_DEP_OFFLINE) : tr(T_DEP_LOADING));
+        if (e.failing) sc = C_BAD;
+    }
+    else if (e.failing && now - e.fetched > 2 * 60) { snprintf(buf, sizeof(buf), "%s", tr(T_DEP_OFFLINE)); sc = C_BAD; }
+    else if (b->not_served) { snprintf(buf, sizeof(buf), "%s", tr(T_DEP_NOT_SERVED)); sc = C_BAD; }
+    else if (b->drop_off_only) snprintf(buf, sizeof(buf), "%s", tr(T_DEP_DROP_OFF));
+    else {
+        char at[8];
+        hhmm(e.fetched, at, sizeof(at));
+        snprintf(buf, sizeof(buf), tr(T_DEP_UPDATED), at);
+    }
+    set_text(p->status, buf);
+    set_color(p->status, sc);
+}
+
+static void empty_refresh(void)
+{
+    bool empty = n_favs == 0;
+    lv_obj_t *pg = page_of(0);
+    for (uint32_t k = 0; k < lv_obj_get_child_count(pg); k++) {
+        lv_obj_t *o = lv_obj_get_child(pg, k);
+        set_hidden(o, (o == empty_title || o == empty_how) ? !empty : empty);
+    }
+    if (empty) {
+        set_text(empty_title, tr(T_NO_STOPS));
+        set_text(empty_how, tr(T_NO_STOPS_HOW));
+    }
+}
+
+static void stops_refresh(void)
+{
+    empty_refresh();
+    for (int i = 0; i < n_favs; i++) stop_refresh(i);
+}
+
+// Every second, every page: the ones not shown too, because a swipe shows a picture of a neighbour rendered in the
+// background (slide.c, refreshed every 2 s): updated only when shown, a swipe showed stale texts for a moment.
+// Changing an off-screen label costs no redraw.
 static void tick(lv_timer_t *t)
 {
     if (lv_screen_active() != scr_main) return;
-    hello_refresh();
+    stops_refresh();
     system_refresh();
+}
+
+static int fav_shown(void)                    // the favourite on view, -1 if none
+{
+    int p = pager_current(pager);
+    return lv_screen_active() == scr_main && p >= 1 && p <= n_favs ? p - 1 : -1;
 }
 
 static void page_settled(int page, void *user)
 {
-    ESP_LOGI(TAG, "page %s", page ? "system" : "hello");
-    if (page == 1) system_refresh();
-    else hello_refresh();
+    ESP_LOGI(TAG, "page %d (%s)", page, page ? "stop" : "system");
+    if (page == 0) system_refresh();
+    else if (page <= n_favs) stop_refresh(page - 1);
+    deps_show(fav_shown());
+}
+
+static void stop_create(int i, lv_obj_t *pg)
+{
+    stop_page_t *p = &sp[i];
+    p->clock = label(pg, f_small, C_DIM, 22, 120);
+    p->badge = lv_obj_create(pg);                         // the route number on the accent colour
+    lv_obj_remove_style_all(p->badge);
+    lv_obj_remove_flag(p->badge, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(p->badge, LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_set_style_bg_color(p->badge, C_ACCENT, 0);
+    lv_obj_set_style_bg_opa(p->badge, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(p->badge, 10, 0);
+    lv_obj_set_style_pad_hor(p->badge, 14, 0);
+    lv_obj_set_style_pad_ver(p->badge, 2, 0);
+    lv_obj_set_size(p->badge, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_align(p->badge, LV_ALIGN_TOP_MID, 0, 56);
+    p->route = lv_label_create(p->badge);
+    lv_obj_set_style_text_font(p->route, f_mid, 0);
+    lv_obj_set_style_text_color(p->route, C_BG, 0);
+    lv_obj_remove_flag(p->route, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(p->route, LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_label_set_text(p->route, "");
+    p->dir = label(pg, f_small, C_TEXT, 106, 340);
+    lv_label_set_long_mode(p->dir, LV_LABEL_LONG_DOT);
+    p->stop = label(pg, f_small, C_DIM, 134, 380);
+    lv_label_set_long_mode(p->stop, LV_LABEL_LONG_DOT);
+    p->big = label(pg, f_big, C_TEXT, 178, 400);
+    p->kind = label(pg, f_small, C_DIM, 256, 360);
+    for (int k = 0; k < 3; k++) {
+        p->next[k] = label(pg, f_mid, C_DIM, 300, 130);
+        lv_obj_align(p->next[k], LV_ALIGN_TOP_MID, (k - 1) * 130, 300);
+    }
+    p->status = label(pg, f_small, C_DIM, 360, 320);
 }
 
 static void main_create(void)
 {
     scr_main = base_screen();
-    pager = pager_create(scr_main, false, 2, NULL, page_settled, NULL);
+    pager = pager_create(scr_main, false, 1 + FAVS_MAX, NULL, page_settled, NULL);
     lv_obj_add_event_cb(pager, long_pressed, LV_EVENT_LONG_PRESSED, NULL);
     slide_pager(pager);                                   // drags drawn as pictures (~60 fps), not LVGL scrolling
-    lv_obj_t *p0 = pager_page(pager, 0), *p1 = pager_page(pager, 1);
-    h_title = label(p0, f_mid, C_ACCENT, 70, 300);
-    h_clock = label(p0, f_big, C_TEXT, 130, 360);
-    h_date = label(p0, f_small, C_TEXT, 215, 360);
-    h_sub = label(p0, f_small, C_DIM, 265, 340);
-    h_hint = label(p0, f_small, C_DIM, 330, 300);
-    s_title = label(p1, f_mid, C_ACCENT, 40, 300);
-    s_lines = label(p1, f_small, C_TEXT, 84, 380);
-    s_qr = make_qr(p1, 92);
+    lv_obj_t *p0 = pager_page(pager, 0);
+    s_title = label(p0, f_mid, C_ACCENT, 40, 300);
+    s_lines = label(p0, f_small, C_TEXT, 84, 380);
+    s_qr = make_qr(p0, 92);
     lv_obj_align(s_qr, LV_ALIGN_TOP_MID, 0, 262);
-    s_scan = label(p1, f_small, C_DIM, 372, 300);   // y 372 + 2 lines: still inside the circle
-    hello_refresh();
+    s_scan = label(p0, f_small, C_DIM, 372, 300);   // y 372 + 2 lines: still inside the circle
+    for (int i = 0; i < FAVS_MAX; i++) stop_create(i, page_of(i));
+    empty_title = label(page_of(0), f_mid, C_ACCENT, 140, 340);
+    empty_how = label(page_of(0), f_small, C_TEXT, 200, 360);
+    pager_set_count(pager, 2);                            // ui_favs_changed() shows as many as there are favourites
+    empty_refresh();
     system_refresh();
     lv_timer_create(tick, 1000, NULL);
+}
+
+void ui_favs_changed(void)
+{
+    int n = 0;
+    dep_entry_t e;
+    while (n < FAVS_MAX && deps_get(n, &e)) n++;
+    display_lock(-1);
+    n_favs = n;
+    pager_set_count(pager, 1 + (n ? n : 1));
+    stops_refresh();
+    display_unlock();
+    deps_show(fav_shown());
+    ESP_LOGI(TAG, "%d favourite page(s)", n);
+}
+
+void ui_deps_changed(int i)
+{
+    display_lock(-1);
+    if (i < n_favs) stop_refresh(i);
+    display_unlock();
 }
 
 /* ---------- message screen (start-up) ---------- */
@@ -248,17 +431,18 @@ void ui_message(const char *title, const char *body)
 void ui_home(void)
 {
     display_lock(-1);
-    hello_refresh();
-    pager_go(pager, 0, false);
+    stops_refresh();
+    pager_go(pager, 1, false);
     if (lv_screen_active() != scr_main) lv_screen_load_anim(scr_main, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
     display_unlock();
+    deps_show(fav_shown());
 }
 
 /* ---------- Wi-Fi setup ----------
  * Page 1: the setup network (this device's own access point and captive portal): scan to join, the settings page
  * opens by itself. Page 2 (Android 10+): Wi-Fi Easy Connect (DPP). The phone scans this QR code and sends the
  * network it's connected to, password included. The setup network stays up on page 2: it holds the radio on Easy
- * Connect's channel (forge_net's dpp_hold_channel). The two pages are a pager like hello | system, so they follow the finger
+ * Connect's channel (forge_net's dpp_hold_channel). The two pages are a pager like stop | system, so they follow the finger
  * (slide.c); each page has all its own objects (title, note, QR code, text, dots): a drag's picture of the page coming
  * in holds only that page. */
 
@@ -503,14 +687,14 @@ void ui_ota(const ota_status_t *st)
 {
     display_lock(-1);
     ota_st = *st;
-    if (lv_screen_active() == scr_main && pager_current(pager) == 1) system_refresh();
+    if (lv_screen_active() == scr_main && pager_current(pager) == 0) system_refresh();
     display_unlock();
 }
 
 void ui_texts_changed(void)
 {
     display_lock(-1);
-    hello_refresh();
+    stops_refresh();
     system_refresh();
     if (su_open) su_texts();
     display_unlock();
@@ -518,16 +702,30 @@ void ui_texts_changed(void)
 
 /* ---------- screen registry (test console, snapshots) ---------- */
 
-static lv_obj_t *get_hello(void) { return pager_page(pager, 0); }
-static lv_obj_t *get_system(void) { return pager_page(pager, 1); }
+static lv_obj_t *get_stop(void) { return page_of(0); }
+static lv_obj_t *get_system(void) { return pager_page(pager, 0); }
 static lv_obj_t *get_setup(void) { return pager_page(su_pager, 0); }
 static lv_obj_t *get_setup1(void) { return pager_page(su_pager, 1); }
 static lv_obj_t *get_msg(void) { return scr_msg; }
-static void show_hello(void) { su_leave(); pager_go(pager, 0, false); lv_screen_load(scr_main); }
-static void show_system(void) { su_leave(); system_refresh(); pager_go(pager, 1, false); lv_screen_load(scr_main); }
+static void show_stop(void)
+{
+    su_leave();
+    stops_refresh();
+    pager_go(pager, 1, false);
+    lv_screen_load(scr_main);
+    deps_show(fav_shown());
+}
+static void show_system(void)
+{
+    su_leave();
+    system_refresh();
+    pager_go(pager, 0, false);
+    lv_screen_load(scr_main);
+    deps_show(-1);
+}
 static void show_setup(void) { ui_wifi_setup(NULL); }
-static bool shown_hello(void) { return lv_screen_active() == scr_main && pager_current(pager) == 0; }
-static bool shown_system(void) { return lv_screen_active() == scr_main && pager_current(pager) == 1; }
+static bool shown_stop(void) { return lv_screen_active() == scr_main && pager_current(pager) == 1; }
+static bool shown_system(void) { return lv_screen_active() == scr_main && pager_current(pager) == 0; }
 static bool shown_setup(void) { return lv_screen_active() == scr_setup && pager_current(su_pager) == 0; }
 static bool shown_setup1(void) { return lv_screen_active() == scr_setup && pager_current(su_pager) == 1; }
 static void show_setup1(void) { ui_wifi_setup(NULL); pager_switch(su_pager, 1); }
@@ -540,7 +738,7 @@ static void prep_setup(void)                         // texts only: no access po
 }
 
 static const screen_def_t screens[] = {
-    { "hello",   get_hello,  show_hello,  hello_refresh,  shown_hello },
+    { "stop",    get_stop,   show_stop,   stops_refresh,  shown_stop },
     { "system",  get_system, show_system, system_refresh, shown_system },
     { "setup",   get_setup,  show_setup,  prep_setup,     shown_setup },
     { "setup1",  get_setup1, show_setup1, prep_setup,     shown_setup1 },

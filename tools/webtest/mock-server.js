@@ -9,6 +9,8 @@
 //                              bug once hid the Install button and nothing tested the "available" state)
 //   POST /__key {key}          the display's key (null: no key needed)
 //   POST /__setup              the page is on the setup network (no key needed, setup: true)
+//   RTC in the mock: routes 800 (directions 0 / 1) and 11; route 800 direction 0 stops at 1025 and 1005, direction 1
+//   at 1026; any other stop or route is "not served" (404). Route "999" makes the RTC unreachable.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -17,6 +19,19 @@ const PAGE = path.join(__dirname, '..', '..', 'main', 'web', 'index.html');
 const port = Number(process.argv[2] || process.env.PORT || 8099);
 const KEY = process.env.MOCK_KEY || '0123456789abcdef';   // the display's key in the tests
 const STATES = ['idle', 'checking', 'up_to_date', 'available', 'downloading', 'done', 'failed'];
+
+// RTC's answers in the mock (shapes as main.c sends them)
+const ROUTES = {
+  800: { route: '800', name: 'Terminus Chute-Montmorency - Colline Parlementaire',
+         dirs: [{ code: '0', name: 'Colline Parlementaire' }, { code: '1', name: 'Terminus Chute-Montmorency' }] },
+  11: { route: '11', name: "Terminus Place-D'Youville - Pointe-de-Sainte-Foy",
+        dirs: [{ code: '0', name: 'Pointe-de-Sainte-Foy' }, { code: '1', name: "Place-D'Youville" }] },
+};
+const STOPS = {
+  '1025/800/0': { stop_name: 'St-Dominique', direction: 'Colline Parlementaire' },
+  '1005/800/0': { stop_name: 'Champlain/1005', direction: 'Colline Parlementaire' },
+  '1026/800/1': { stop_name: 'St-Dominique', direction: 'Terminus Chute-Montmorency' },
+};
 
 function fresh() {
   return {
@@ -31,6 +46,7 @@ function fresh() {
     settings: [],                             // every POST /api/settings body
     key: KEY,                                 // POSTs and snapshots need X-Key (null: none)
     log: [],                                  // every API call: {method, url, body} or {..., refused}
+    favs: [],                                 // the favourite stops, as POST /api/favs saved them
   };
 }
 let st = fresh();
@@ -96,8 +112,27 @@ const routes = {
     return [200, { ok: true }];
   },
   'GET /api/snapshot': () => [404, { error: 'no snapshots in the mock' }],
+  'GET /api/favs': () => [200, { max: 8, favs: st.favs.map(f => ({ ...f, ...(STOPS[f.stop + '/' + f.route + '/' + f.dir] || {}) })) }],
+  'POST /api/route': b => {
+    if (b && b.route === '999') return [200, { ok: false, why: 'rtc' }];
+    const r = b && ROUTES[b.route];
+    return [200, r ? { ok: true, ...r } : { ok: false, why: 'no_route' }];
+  },
+  'POST /api/favs': b => {
+    if (!b || !Array.isArray(b.favs) || b.favs.length > 8) return [200, { ok: false, bad: 0, why: 'invalid' }];
+    for (let i = 0; i < b.favs.length; i++) {
+      const f = b.favs[i];
+      if (!/^\d{1,6}$/.test(f.stop) || !/^[0-9A-Za-z]{1,5}$/.test(f.route) || !/^\d{1,3}$/.test(f.dir))
+        return [200, { ok: false, bad: i, why: 'invalid' }];
+      if (f.route === '999') return [200, { ok: false, bad: i, why: 'rtc' }];
+      if (!STOPS[f.stop + '/' + f.route + '/' + f.dir]) return [200, { ok: false, bad: i, why: 'not_served' }];
+    }
+    st.favs = b.favs.map(f => ({ stop: f.stop, route: f.route, dir: f.dir }));
+    return [200, { ok: true }];
+  },
 };
 const GUARDED = new Set(['GET /api/snapshot']);          // GETs that need the key too
+const NOT_AP = new Set(['GET /api/snapshot']);           // refused on the setup network (web_route_t.not_ap in the firmware)
 
 http.createServer(async (req, res) => {
   const url = req.url.split('?')[0];
@@ -129,8 +164,12 @@ http.createServer(async (req, res) => {
   }
   const fn = routes[route];
   if (!fn) { res.writeHead(404); return res.end('not found'); }
-  // The device's rules (forge_net web): the key on every POST and on snapshots, except on the setup network;
-  // POST bodies are JSON
+  // The device's rules (forge_net web): some routes never on the setup network (403); the key on every POST and on
+  // snapshots, except on the setup network; POST bodies are JSON
+  if (st.info.setup && NOT_AP.has(route)) {
+    st.log.push({ method: req.method, url, refused: 403 });
+    return json(res, 403, { error: 'setup' });
+  }
   if ((req.method === 'POST' || GUARDED.has(route)) && st.key && !st.info.setup && req.headers['x-key'] !== st.key) {
     st.log.push({ method: req.method, url, refused: 401 });
     return json(res, 401, { error: 'key' });
