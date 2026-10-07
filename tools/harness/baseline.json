@@ -26,14 +26,14 @@
   "ref": 119
  },
  "internal_largest_kb": {
-  "min": 33.0,
-  "note": "first run",
-  "ref": 44
+  "min": 28.0,
+  "ref": 31,
+  "note": "v0.3.0: the microphones (I2S DMA buffers, presence task) take internal RAM: was ref 44"
  },
  "internal_min_kb": {
-  "min": 80.2,
-  "note": "first run",
-  "ref": 107
+  "min": 72.0,
+  "ref": 76,
+  "note": "v0.3.0: the microphones (I2S DMA buffers, presence task) take internal RAM: was ref 107"
  },
  "lvgl_internal_fallbacks": {
   "max": 0.0,
