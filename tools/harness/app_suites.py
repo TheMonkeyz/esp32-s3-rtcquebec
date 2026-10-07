@@ -119,6 +119,35 @@ def tap_opens_map(ctx):
 
 
 @test('navigation')
+def map_zoom(ctx):
+    r"""On the map, swipe down zooms in and swipe up zooms out (as weather_amoled's radar; user's request, 2026-10-07):
+    each zoom's tiles arrive, the map stays open (a swipe's release is not a tap), and a tap still closes it."""
+    b = ctx.board
+    if not ctx.board.api('/api/favs').get('favs'):
+        ctx.note('no favourite stop on this board: not checked')
+        return
+    b.show(NEXT)
+    b.wait_screen(NEXT, 6)
+    time.sleep(1)
+    b.tap()
+    b.wait_screen('map', 6)
+    time.sleep(3)
+    seen = []
+    for cmd in ('swipe down', 'swipe up', 'swipe up'):
+        at = len(ctx.log.lines())                          # both lines come after the swipe: look from there
+        b.cmd(cmd)
+        m = ctx.log.wait(r'ui: map zoom (\d+)', 5, f'{cmd}: a new zoom', start=at)
+        z = int(m.group(1))
+        ctx.log.wait(r'map: zoom %d at' % z, 30, f'zoom {z} tiles (downloaded or kept)', start=at)
+        check(b.screen() == 'map', f'{cmd} closed the map')
+        seen.append(z)
+    check(seen[1] == seen[0] - 1 and seen[2] == seen[1] - 1, f'zooms {seen}')
+    b.tap()
+    b.wait_screen(NEXT, 6)
+    ctx.note(f'zooms {seen} by swipes down, up, up; the map stayed open; a tap closed it')
+
+
+@test('navigation')
 def setup_pages_slide(ctx):
     """Setup's two pages (setup network | Easy Connect) follow the finger like system | stop, and the Easy Connect QR
     code shows up quickly. User reports, October 4: the setup pages only switched after the swipe (and froze while

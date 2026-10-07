@@ -37,6 +37,7 @@ typedef struct {
 // task (take the display lock)
 #define DEPS_CHANGED_ALERTS -1
 #define DEPS_CHANGED_BUSES -2
+#define DEPS_CHANGED_TRACE -3
 void deps_start(void (*changed)(int i));
 void deps_set_favs(const rtc_fav_t *favs, int n);   // replaces the list; the new ones are fetched soon
 void deps_show(int i);                              // the favourite on view (-1: none); fetched now if due
@@ -50,6 +51,13 @@ int deps_alerts_for(int i);                         // how many concern favourit
 // The map: favourite i's route's buses in its direction, every DEPS_BUSES_S while tracked (-1: stop)
 void deps_track(int i);
 int deps_buses(rtc_bus_t *out, int max, time_t *fetched, bool *failing);
+
+// The tracked route's path in its direction (once per route, direction and day while tracked): up to DEPS_TRACE_VARIANTS
+// polylines, lat/lon pairs. Copies at most max points in all into latlon, the variants' point counts into len[];
+// returns how many variants (0: not fetched yet).
+#define DEPS_TRACE_VARIANTS 4
+#define DEPS_TRACE_POINTS 3000
+int deps_trace(float *latlon, int max, int *len);
 
 // For the settings page: one request run by the fetch task, waiting up to 20 s.
 // 1 = found, 0 = RTC says no such route / stop on that route, -1 = couldn't ask (offline, timeout, bad reply).

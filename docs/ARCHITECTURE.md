@@ -54,13 +54,22 @@ first stop; swipe right for the system page. Long-press anywhere: Wi-Fi setup (e
   or the language change (a signature of their ids). Status line: "Updated at", or "Can't reach the RTC" after 30 min
   of failures. Empty: "No alerts for your routes".
 - **map** (its own screen, `map_create` / `map_refresh` in ui.c, tiles in map.c): a tap on a stop page opens it,
-  a tap anywhere closes it, and it closes by itself after 5 min without a touch. OpenStreetMap tiles at zoom 15 (~3.3
-  m a pixel, ~1.5 km across) centred on the stop (its latitude/longitude from the departures reply), dimmed as
-  weather_amoled's radar (`dim_map`), as an RGB565 `lv_image` in PSRAM; the stop a blue dot in a white ring; the
-  route's buses in the favourite's direction as green dots, and a bus beyond 200 px from the centre on that circle,
-  hollow (`geo_clamp_circle`); top: route and direction; bottom: "Next bus: 5 min" or what's wrong; "©
+  a tap anywhere closes it, and it closes by itself after 5 min without a touch. Swipe down to zoom in, up to zoom
+  out (weather_amoled's radar gesture; the swipe's release waits, so it isn't also a tap), zoom 13 (~6 km across) to
+  17 (~370 m), 15 (~1.5 km) at first, the last one kept while the device runs; until a new zoom's tiles are all
+  there the previous picture stays on view, scaled about the stop (`lv_image_set_scale`), while the path and buses
+  already use the new zoom. OpenStreetMap tiles centred on the stop (its latitude/longitude from the departures reply), dimmed as
+  weather_amoled's radar (`dim_map`), as an RGB565 `lv_image` in PSRAM; the route's path in the favourite's
+  direction as blue `lv_line`s (one per variant, a point within 3 px of the last one drawn skipped: 739 points for
+  route 800 to ~200 on screen), under everything else; the stop a blue dot in a white ring; the route's buses in the
+  favourite's direction as small bus icons built from LVGL objects (green body, dark outline and windshield,
+  headlights: the fonts have no bus), only those within 220 px of the centre (user, 2026-10-07: a bus beyond the
+  round map isn't shown; v0.2.x first put it on the edge, off its path, which looked wrong); top: route and direction; bottom: "Next bus: 5 min" or what's wrong; "©
   OpenStreetMap" under it (the licence). A tap within 600 ms of a page settling (or during a slide) is not a tap: a
-  second quick swipe's press reached LVGL as one and opened the map (harness quick_swipes, 2026-10-07).
+  second quick swipe's press reached LVGL as one and opened the map (harness quick_swipes, 2026-10-07). The tick
+  that stops a map left by another path ignores the map's first 500 ms: during its 200 ms fade-in
+  `lv_screen_active()` is still the stop page, and v0.2.0 sometimes closed the map's tracking as it opened (no
+  buses, no zoom; harness map_zoom).
 - **system**: espforge's page (version, Wi-Fi, address, memory, uptime, updates, settings QR code).
 
 Every second the `tick` timer refreshes every stop page, the ones not shown too (a swipe shows a neighbour's picture
@@ -114,10 +123,18 @@ Decided 2026-10-06 (user): **the display calls RTC's web API directly**, for per
   `Access-Control-Allow-Origin: *`. Asked every 20 s (`DEPS_BUSES_S`) only while a map is open (`deps_track`), before
   anything else the task has due. `rtc_parse_buses` (host test on a reply saved 2026-10-07) skips 0,0 positions.
   The same script knows `ListeHoraire_Autobus?idAutobus=&idVoyage=` (a bus's next passages), unused.
+- **Route paths**: `RTC_API/ListeParcoursTypeTrace_ParcoursPeriode?noParcours=800&codeDirection=0&date=yyyymmdd`
+  (the website's `getParcoursTrace`): a list of the route's variants `{idParcoursType, polyligne}`, each a
+  Google-encoded polyline (precision 5); route 800 toward Colline Parlementaire: 2.4 KB, 2 variants (435 and 304
+  points, the second a shorter trip on the same streets); `Cache-Control: max-age=38971` (~11 h), CORS `*`. The
+  website draws the last variant only; the display draws them all. Fetched once per route, direction and service
+  day while a map is open, kept when the map closes (reopening asks nothing), forgotten for another route; retried
+  after 5 min when it fails. `rtc_parse_traces` and `rtc_polyline_decode` (host test: Google's own example and the
+  reply saved 2026-10-07).
 - **Map tiles**: `https://tile.openstreetmap.org/15/x/y.png` (OSM's tile usage policy: the firmware's identifying
   User-Agent, one keep-alive connection, tiles kept while in use): 9 tiles (5-60 KB) for a 466 px picture, decoded a
   row at a time by forge_core's `png_rows` (the ROM's inflate), the last 3 pictures kept in PSRAM (map.c,
-  `MAP_SLOTS`; ~434 KB each): reopening a stop's map downloads nothing; nothing kept across a restart (a flash
+  `MAP_SLOTS`, 4: a stop at two zooms and another; ~434 KB each): reopening a stop's map downloads nothing; nothing kept across a restart (a flash
   cache needs a partition an update over Wi-Fi can't add). Service "OpenStreetMap" in the health list. The
   emulator fetches tiles with `fetch()` and decodes them with miniz's tinfl (web/emu/Makefile).
 

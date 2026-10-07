@@ -27,7 +27,7 @@ $(OUT)/test_textfit: test_textfit.c $(FORGE)/textfit.c $(FORGE)/include/textfit.
 	$(CC) $(CFLAGS) -o $@ test_textfit.c $(FORGE)/textfit.c
 # rtc_api.c parses RTC's replies with cJSON (ESP-IDF's copy); the replies are in data/
 $(OUT)/test_rtc_api: test_rtc_api.c $(MAIN)/rtc_api.c $(MAIN)/rtc_api.h | $(OUT)
-	$(CC) $(CFLAGS) -I$(CJSON) -o $@ test_rtc_api.c $(MAIN)/rtc_api.c $(CJSON)/cJSON.c
+	$(CC) $(CFLAGS) -I$(CJSON) -o $@ test_rtc_api.c $(MAIN)/rtc_api.c $(CJSON)/cJSON.c -lm
 $(OUT)/test_geo: test_geo.c $(MAIN)/geo.c $(MAIN)/geo.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_geo.c $(MAIN)/geo.c -lm
 $(OUT)/test_testcon: test_testcon.c $(FORGE)/testcon_registry.c $(FORGE)/include/testcon.h | $(OUT)

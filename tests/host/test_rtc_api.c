@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "check.h"
+#include <math.h>
 #include "rtc_api.h"
 
 static char *slurp(const char *path)
@@ -15,6 +16,20 @@ static char *slurp(const char *path)
     s[fread(s, 1, n, f)] = 0;
     fclose(f);
     return s;
+}
+
+// rtc_parse_traces' callback in the test: count the variants, decode the first, keep its ends
+typedef struct { int n, pts[4]; float first[2], last[2]; } trace_test_t;
+void on_trace(const char *p, void *u)
+{
+    trace_test_t *t = u;
+    static float ll[2 * 1000];
+    int n = rtc_polyline_decode(p, ll, 1000);
+    if (t->n < 4) t->pts[t->n] = n;
+    if (t->n++ == 0 && n) {
+        t->first[0] = ll[0]; t->first[1] = ll[1];
+        t->last[0] = ll[2 * n - 2]; t->last[1] = ll[2 * n - 1];
+    }
 }
 
 int main(void)
@@ -115,6 +130,25 @@ int main(void)
                           "\"longitude\":-71.2}]", bus, RTC_BUSES_MAX) == 1 && !strcmp(bus[0].id, "2"), "0,0 skipped");
     CHECK(rtc_parse_buses("null", bus, RTC_BUSES_MAX) == -1 && rtc_parse_buses("{}", bus, 2) == -1, "not a list");
 
+    // Route paths: Google's own example polyline, then route 800 toward Colline Parlementaire (2026-10-07, two
+    // variants: 435 and 304 points from Terminus Chute-Montmorency; values from a Python decoder)
+    static float ll[2 * 1000];
+    int np = rtc_polyline_decode("_p~iF~ps|U_ulLnnqC_mqNvxq`@", ll, 1000);
+    CHECK(np == 3 && fabsf(ll[0] - 38.5f) < 1e-4 && fabsf(ll[1] + 120.2f) < 1e-4 && fabsf(ll[4] - 43.252f) < 1e-4
+          && fabsf(ll[5] + 126.453f) < 1e-4, "%d: %f %f .. %f %f", np, ll[0], ll[1], ll[4], ll[5]);
+    CHECK(rtc_polyline_decode("_p~iF~ps|U_ulLnnqC_mqNvxq`@", ll, 2) == 2, "max");
+    CHECK(rtc_polyline_decode("_p~iF~ps|U_ul", ll, 1000) == 1, "cut short");
+    CHECK(rtc_polyline_decode("", ll, 1000) == 0, "empty");
+    s = slurp("data/rtc_trace_800_0.json");
+    trace_test_t tr = {0};
+
+    CHECK(rtc_parse_traces(s, on_trace, &tr) == 2 && tr.n == 2, "%d variants", tr.n);
+    CHECK(tr.pts[0] == 435 && tr.pts[1] == 304, "%d, %d points", tr.pts[0], tr.pts[1]);
+    CHECK(fabsf(tr.first[0] - 46.89154f) < 1e-4 && fabsf(tr.first[1] + 71.14928f) < 1e-4, "%f %f", tr.first[0], tr.first[1]);
+    CHECK(fabsf(tr.last[0] - 46.80618f) < 1e-4 && fabsf(tr.last[1] + 71.2204f) < 1e-4, "%f %f", tr.last[0], tr.last[1]);
+    free(s);
+    CHECK(rtc_parse_traces("null", on_trace, &tr) == -1, "null");
+
     char url[200];
     rtc_fav_t f = { "1025", "800", "0" };
     CHECK(rtc_board_url(url, sizeof(url), &f, "20261006") && !strcmp(url,
@@ -130,6 +164,10 @@ int main(void)
     CHECK(rtc_buses_url(url, sizeof(url), "800", "0") && !strcmp(url,
           "https://api-iv.rtcquebec.ca/api/legacy/ListeAutobus_Parcours?noParcours=800&codeDirection=0"), "%s", url);
     CHECK(!rtc_buses_url(url, sizeof(url), "800", "x"), "bad direction");
+    CHECK(rtc_trace_url(url, sizeof(url), "800", "0", "20261007") && !strcmp(url,
+          "https://api-iv.rtcquebec.ca/api/legacy/ListeParcoursTypeTrace_ParcoursPeriode?noParcours=800&codeDirection=0"
+          "&date=20261007"), "%s", url);
+    CHECK(!rtc_trace_url(url, sizeof(url), "800", "0", "2026-10-07"), "bad date");
     static char big[2048];
     CHECK(rtc_notices_url(big, sizeof(big), "800", "2026-10-07T00:52:00-04:00"), "notices url");
     CHECK(strstr(big, "condition%5D%5Bvalue%5D=800&") && strstr(big, "value%5D=2026-10-07T00%3A52%3A00-04%3A00&")

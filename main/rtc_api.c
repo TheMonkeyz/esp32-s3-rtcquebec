@@ -301,6 +301,58 @@ int rtc_parse_buses(const char *json, rtc_bus_t *out, int max)
     return n;
 }
 
+bool rtc_trace_url(char *out, size_t n, const char *route, const char *dir, const char *date)
+{
+    if (!all(route, 1, 5, isalnum) || !all(dir, 1, 3, isdigit) || !all(date, 8, 8, isdigit)) return false;
+    int len = snprintf(out, n, RTC_API "/ListeParcoursTypeTrace_ParcoursPeriode?noParcours=%s&codeDirection=%s&date=%s",
+                       route, dir, date);
+    return len > 0 && (size_t)len < n;
+}
+
+int rtc_parse_traces(const char *json, void (*cb)(const char *polyline, void *user), void *user)
+{
+    cJSON *j = cJSON_Parse(json);
+    if (!cJSON_IsArray(j)) { cJSON_Delete(j); return -1; }
+    int n = 0;
+    const cJSON *v;
+    cJSON_ArrayForEach(v, j) {
+        const char *p = cJSON_GetStringValue(cJSON_GetObjectItem(v, "polyligne"));
+        if (!p || !*p) continue;
+        cb(p, user);
+        n++;
+    }
+    cJSON_Delete(j);
+    return n;
+}
+
+// Google's encoding: each value a zig-zag signed delta in 5-bit groups + 63, lat then lon, 1e-5 degrees
+int rtc_polyline_decode(const char *s, float *latlon, int max)
+{
+    long lat = 0, lon = 0;
+    int n = 0;
+    while (*s && n < max) {
+        long v[2];
+        for (int k = 0; k < 2; k++) {
+            long res = 0;
+            int shift = 0, b;
+            do {
+                if (!*s) return n;                            // cut short: the points so far
+                b = *s++ - 63;
+                if (b < 0 || b > 63) return n;                // not a polyline character
+                res |= (long)(b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20 && shift < 60);
+            v[k] = res & 1 ? ~(res >> 1) : res >> 1;
+        }
+        lat += v[0];
+        lon += v[1];
+        latlon[2 * n] = lat / 1e5f;
+        latlon[2 * n + 1] = lon / 1e5f;
+        n++;
+    }
+    return n;
+}
+
 bool rtc_parse_route(const char *json, rtc_route_t *out)
 {
     memset(out, 0, sizeof(*out));

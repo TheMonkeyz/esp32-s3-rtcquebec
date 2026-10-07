@@ -51,6 +51,13 @@ static bool bus_failing;
 static int n_bus;
 static rtc_bus_t bus[RTC_BUSES_MAX];
 
+// Its route's path: the variants' points one after the other (PSRAM), fetched once per route, direction and day
+static char trace_key[32];                  // "800/0/20261007" fetched (or tried and failed: retried in 5 min)
+static int64_t trace_tried;
+static int n_trace, trace_len[DEPS_TRACE_VARIANTS];
+static EXT_RAM_BSS_ATTR float trace_pts[2 * DEPS_TRACE_POINTS];
+#define TRACE_CAP (64 * 1024)               // route 800: 2.4 KB
+
 // A lookup for the settings page, run by the task (one at a time: job_mu)
 typedef struct {
     bool route;                         // a route's directions, else a favourite's board
@@ -147,6 +154,41 @@ static bool now_iso(char *out, int n)
     return true;
 }
 
+// A route path's variants, decoded into a staging copy, then swapped in under the lock
+typedef struct { int n, used, len[DEPS_TRACE_VARIANTS]; float *pts; } trace_stage_t;
+static void on_trace(const char *poly, void *user)
+{
+    trace_stage_t *t = user;
+    if (t->n == DEPS_TRACE_VARIANTS) return;
+    int k = rtc_polyline_decode(poly, t->pts + 2 * t->used, DEPS_TRACE_POINTS - t->used);
+    t->len[t->n++] = k;
+    t->used += k;
+}
+static bool parse_trace(const char *s, void *out) { return rtc_parse_traces(s, on_trace, out) >= 0; }
+
+static void fetch_trace(const rtc_fav_t *f, const char *date, const char *key)
+{
+    char url[200];
+    char *buf = heap_caps_malloc(TRACE_CAP, MALLOC_CAP_SPIRAM);
+    float *pts = heap_caps_malloc(sizeof(trace_pts), MALLOC_CAP_SPIRAM);
+    trace_stage_t t = { .pts = pts };
+    int st = buf && pts && rtc_trace_url(url, sizeof(url), f->route, f->dir, date)
+             ? get(url, buf, TRACE_CAP, parse_trace, &t) : -1;
+    xSemaphoreTake(mu, portMAX_DELAY);
+    bool same = track >= 0 && !memcmp(&track_fav, f, sizeof(*f));
+    if (same && st == 200) {
+        memcpy(trace_pts, pts, 2 * t.used * sizeof(float));
+        memcpy(trace_len, t.len, sizeof(trace_len));
+        n_trace = t.n;
+        strlcpy(trace_key, key, sizeof(trace_key));
+    }
+    xSemaphoreGive(mu);
+    if (same && st == 200) ESP_LOGI(TAG, "route %s/%s path: %d variant(s), %d points", f->route, f->dir, t.n, t.used);
+    free(buf);
+    free(pts);
+    if (same && st == 200 && on_changed) on_changed(DEPS_CHANGED_TRACE);
+}
+
 // 1 fetched, -1 failed; nt / n filled on success
 static int ask_notices(const char *route, rtc_notice_t *nt, int *n)
 {
@@ -210,6 +252,25 @@ static void fetch_task(void *arg)
         }
         char date[12];
         if (!net_is_connected() || !deps_date(date, sizeof(date))) continue;
+
+        // The map's route path, once (it changes with the service day at most)
+        char tkey[32] = "";                                   // (date: today's, checked above)
+        xSemaphoreTake(mu, portMAX_DELAY);
+        if (track >= 0) {
+            char key[32];
+            snprintf(key, sizeof(key), "%s/%s/%s", track_fav.route, track_fav.dir, date);
+            if (strcmp(key, trace_key) && (!trace_tried || esp_timer_get_time() - trace_tried > 5 * 60 * 1000000LL)) {
+                strlcpy(tkey, key, sizeof(tkey));
+                trace_tried = esp_timer_get_time();
+            }
+        }
+        rtc_fav_t trf = track_fav;
+        xSemaphoreGive(mu);
+        if (tkey[0]) {
+            fetch_trace(&trf, date, tkey);
+            vTaskDelay(pdMS_TO_TICKS(GAP_MS));
+            continue;
+        }
 
         // The map's buses first: someone is looking at them
         xSemaphoreTake(mu, portMAX_DELAY);
@@ -419,11 +480,18 @@ void deps_track(int i)
     if (!mu) return;
     xSemaphoreTake(mu, portMAX_DELAY);
     bool same = i >= 0 && i < n_ent && track >= 0 && !memcmp(&track_fav, &ent[i].fav, sizeof(rtc_fav_t));
-    if (!same) {                                              // another route: forget the other's buses
+    if (!same) {                                              // a new opening or another favourite: its buses now
         n_bus = 0;
         bus_tried = 0;
         bus_fetched = 0;
         bus_failing = false;
+    }
+    // The path: kept when the map closes and for the same route and direction (reopened), forgotten for another
+    bool other_route = i >= 0 && i < n_ent && (strcmp(track_fav.route, ent[i].fav.route) || strcmp(track_fav.dir, ent[i].fav.dir));
+    if (other_route) {
+        n_trace = 0;
+        trace_key[0] = 0;
+        trace_tried = 0;
     }
     track = i >= 0 && i < n_ent ? i : -1;
     if (track >= 0) track_fav = ent[i].fav;
@@ -439,6 +507,21 @@ int deps_buses(rtc_bus_t *out, int max, time_t *fetched, bool *failing)
     memcpy(out, bus, n * sizeof(bus[0]));
     if (fetched) *fetched = bus_fetched;
     if (failing) *failing = bus_failing;
+    xSemaphoreGive(mu);
+    return n;
+}
+
+int deps_trace(float *latlon, int max, int *len)
+{
+    if (!mu) return 0;
+    xSemaphoreTake(mu, portMAX_DELAY);
+    int used = 0, n = 0;
+    for (; n < n_trace; n++) {
+        int k = trace_len[n] < max - used ? trace_len[n] : max - used;
+        memcpy(latlon + 2 * used, trace_pts + 2 * used, 2 * k * sizeof(float));
+        len[n] = k;
+        used += k;
+    }
     xSemaphoreGive(mu);
     return n;
 }

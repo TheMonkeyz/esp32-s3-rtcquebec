@@ -49,6 +49,15 @@ typedef struct {
 bool rtc_buses_url(char *out, size_t n, const char *route, const char *dir);
 int rtc_parse_buses(const char *json, rtc_bus_t *out, int max);   // how many, -1 if it isn't that reply
 
+// ListeParcoursTypeTrace_ParcoursPeriode: a route's path in one direction, as Google-encoded polylines (one per
+// variant of the route: a full trip, shorter ones); the website's route map draws it ("getParcoursTrace"). RTC caches
+// it ~11 h. date: yyyymmdd.
+bool rtc_trace_url(char *out, size_t n, const char *route, const char *dir, const char *date);
+// Calls cb with each variant's encoded polyline; returns how many, -1 if it isn't that reply
+int rtc_parse_traces(const char *json, void (*cb)(const char *polyline, void *user), void *user);
+// A Google-encoded polyline (precision 5) -> lat, lon pairs into latlon[2 * i], at most max points; returns how many
+int rtc_polyline_decode(const char *s, float *latlon, int max);
+
 // Parcours_Periode: a route and its two directions
 typedef struct {
     char route[8];

@@ -23,6 +23,7 @@ static const char *TAG = "map";
 
 typedef struct {
     uint16_t *px;
+    int zoom;
     double ox, oy;
     map_state_t state;
     int tiles, done;
@@ -111,7 +112,7 @@ static bool load(int s, body_t *b)
     esp_http_client_handle_t hc = NULL;
     for (int ty = ty0; ty <= ty1; ty++)
         for (int tx = tx0; tx <= tx1; tx++) {
-            snprintf(url, sizeof(url), "https://tile.openstreetmap.org/%d/%d/%d.png", MAP_ZOOM, tx, ty);
+            snprintf(url, sizeof(url), "https://tile.openstreetmap.org/%d/%d/%d.png", sl->zoom, tx, ty);
             bool got = false;
             for (int a = 0; a < 2 && !got; a++) got = fetch(&hc, url, b);
             tile_t t = { sl->px, tx * GEO_TILE - (int)sl->ox, ty * GEO_TILE - (int)sl->oy };
@@ -122,7 +123,7 @@ static bool load(int s, body_t *b)
             if (on_updated) on_updated();
         }
     if (hc) esp_http_client_cleanup(hc);
-    ESP_LOGI(TAG, "zoom %d at %.0f,%.0f: %d/%d tiles", MAP_ZOOM, sl->ox, sl->oy, ok, sl->tiles);
+    ESP_LOGI(TAG, "zoom %d at %.0f,%.0f: %d/%d tiles", sl->zoom, sl->ox, sl->oy, ok, sl->tiles);
     return ok == sl->tiles;
 }
 
@@ -166,19 +167,21 @@ void map_init(void (*updated)(void))
 
 static void fill(map_view_t *out, const slot_t *s)
 {
-    *out = (map_view_t){ .px = s->px, .ox = s->ox, .oy = s->oy, .state = s->state, .tiles = s->tiles, .done = s->done };
+    *out = (map_view_t){ .px = s->px, .zoom = s->zoom, .ox = s->ox, .oy = s->oy, .state = s->state, .tiles = s->tiles,
+                         .done = s->done };
 }
 
-void map_show(double lat, double lon, map_view_t *out)
+void map_show(double lat, double lon, int zoom, map_view_t *out)
 {
     double x, y;
-    geo_world_px(lat, lon, MAP_ZOOM, &x, &y);
+    geo_world_px(lat, lon, zoom, &x, &y);
     double ox = floor(x - MAP_SIZE / 2), oy = floor(y - MAP_SIZE / 2);
     xSemaphoreTake(mu, portMAX_DELAY);
     int s = -1;
     for (int i = 0; i < MAP_SLOTS && s < 0; i++)            // kept? (a failed one is tried again)
-        if (slots[i].valid && slots[i].ox == ox && slots[i].oy == oy) s = i;
+        if (slots[i].valid && slots[i].zoom == zoom && slots[i].ox == ox && slots[i].oy == oy) s = i;
     if (s >= 0 && slots[s].state == MAP_FAILED) slots[s].state = MAP_LOADING;
+    if (s >= 0 && slots[s].state == MAP_READY) ESP_LOGI(TAG, "zoom %d at %.0f,%.0f: kept", zoom, ox, oy);
     if (s < 0) {                                            // a new picture in the least recently used slot
         s = 0;
         for (int i = 1; i < MAP_SLOTS; i++) if (!slots[i].valid || (slots[s].valid && slots[i].used < slots[s].used)) s = i;
@@ -186,6 +189,7 @@ void map_show(double lat, double lon, map_view_t *out)
         if (!sl->px) sl->px = heap_caps_malloc(MAP_SIZE * MAP_SIZE * 2, MALLOC_CAP_SPIRAM);
         int tx0, ty0, tx1, ty1;
         geo_tiles(ox, oy, MAP_SIZE, MAP_SIZE, &tx0, &ty0, &tx1, &ty1);
+        sl->zoom = zoom;
         sl->ox = ox;
         sl->oy = oy;
         sl->tiles = (tx1 - tx0 + 1) * (ty1 - ty0 + 1);

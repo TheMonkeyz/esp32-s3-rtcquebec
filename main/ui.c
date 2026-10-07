@@ -51,6 +51,8 @@ static lv_obj_t *scr_map;                // the map screen (below: map_create)
 static int mp_fav = -1;
 static void map_refresh(void);
 static void map_leave(void);
+static uint32_t mp_opened;                // lv_tick when the map was opened (it fades in for 200 ms)
+static void map_path(void);
 static void stop_tapped(lv_event_t *e);
 static lv_obj_t *s_title, *s_lines, *s_qr, *s_scan;
 static lv_obj_t *m_title, *m_body;
@@ -453,7 +455,9 @@ static void stops_refresh(void)
 // Changing an off-screen label costs no redraw.
 static void tick(lv_timer_t *t)
 {
-    if (mp_fav >= 0 && lv_screen_active() != scr_map) map_leave();   // left by another path (setup, the console)
+    // A map left by another path (setup, the console) stops its tracking; not one still fading in (lv_screen_active()
+    // is the previous screen during its 200 ms load: a tick then closed it as it opened, v0.2.0, harness map_zoom)
+    if (mp_fav >= 0 && lv_screen_active() != scr_map && lv_tick_elaps(mp_opened) > 500) map_leave();
     if (lv_screen_active() == scr_map) map_refresh();
     if (lv_screen_active() != scr_main) return;
     stops_refresh();
@@ -566,6 +570,7 @@ void ui_favs_changed(void)
 void ui_deps_changed(int i)
 {
     display_lock(-1);
+    if (i == DEPS_CHANGED_TRACE && lv_screen_active() == scr_map) map_path();
     if (i == DEPS_CHANGED_BUSES || (i >= 0 && i == mp_fav)) map_refresh();
     if (i == DEPS_CHANGED_ALERTS) stops_refresh();        // alerts: their page and every stop's line
     else if (i >= 0 && i < n_favs) stop_refresh(i);
@@ -573,19 +578,29 @@ void ui_deps_changed(int i)
 }
 
 /* ---------- map screen ----------
- * A tap on a stop page: the street map around the stop (map.c: OpenStreetMap tiles, dimmed), the stop at the centre,
- * the route's buses heading the favourite's way (departures.c, every 20 s while the map is open) as green dots; a
- * bus beyond the round edge sits on it, hollow, in its direction. A tap anywhere goes back; after MAP_IDLE_MS without
- * a touch it goes back by itself (no positions are fetched for a map nobody looks at). */
+ * A tap on a stop page: the street map around the stop (map.c: OpenStreetMap tiles, dimmed), the route's path in the
+ * favourite's direction (RTC's polylines, all its variants) in blue, the stop at the centre, the route's buses heading
+ * that way (departures.c, every 20 s while the map is open) as small green buses, only those inside the round map (the
+ * user's choice, 2026-10-07: a bus beyond it isn't shown). Swipe down to zoom in, up to zoom out (as weather_amoled's
+ * radar), MAP_ZOOM_MIN..MAP_ZOOM_MAX; until the new zoom's tiles are all there the picture on view is the previous
+ * one, scaled. A tap anywhere goes back; after MAP_IDLE_MS without a touch it goes back by itself (no positions are
+ * fetched for a map nobody looks at). */
 
 #define MAP_IDLE_MS (5 * 60 * 1000)
-#define MAP_EDGE 200                                      // a bus farther from the centre sits on this circle
+#define MAP_TITLE_W 286                                   // the round screen's width around y 50..80, less a margin
+#define MAP_VISIBLE 220                                   // a bus farther from the centre than this isn't shown
 
 static lv_obj_t *mp_img, *mp_stop, *mp_top, *mp_bottom, *mp_attrib, *mp_bus[RTC_BUSES_MAX];
 static lv_image_dsc_t mp_dsc;
+static lv_obj_t *mp_path[DEPS_TRACE_VARIANTS];            // the route's path: one line per variant
+static lv_point_precise_t *mp_pts;                         // their points on the screen (PSRAM)
+static float *mp_ll;                                       // ...as deps_trace() gives them (lat, lon; PSRAM)
+#define PATH_STEP 3                                        // a point closer than this to the last one drawn is skipped
 // mp_fav (top of the file): the favourite whose map is open, -1 if none
 static bool mp_view_set;                                  // the picture for its stop is chosen (map_show)
-static map_view_t mp_view;
+static map_view_t mp_view;                                // the zoom asked for (markers and path use it)
+static map_view_t mp_shown;                               // the picture on view: mp_view's, or the previous zoom's, scaled
+static int mp_zoom = MAP_ZOOM;                            // the last zoom chosen (kept while the device runs)
 static lv_timer_t *mp_idle;
 
 static lv_obj_t *pill(lv_obj_t *parent, lv_font_t *f, int y, int w)
@@ -600,6 +615,37 @@ static lv_obj_t *pill(lv_obj_t *parent, lv_font_t *f, int y, int w)
     lv_obj_set_style_pad_ver(l, 4, 0);
     lv_obj_align(l, LV_ALIGN_TOP_MID, 0, y);
     return l;
+}
+
+// A small bus seen from the front: green body, dark windshield and bumper, a dark outline that keeps it visible on the
+// map (Montserrat and LVGL's symbols have no bus)
+static lv_obj_t *bus_icon(lv_obj_t *parent)
+{
+    lv_obj_t *b = lv_obj_create(parent);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_size(b, 22, 26);
+    lv_obj_set_style_radius(b, 6, 0);
+    lv_obj_set_style_bg_color(b, C_LIVE, 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(b, C_BG, 0);
+    lv_obj_set_style_border_width(b, 2, 0);
+    lv_obj_remove_flag(b, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(b, LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_HIDDEN);
+    static const struct { int x, y, w, h, r; } parts[] = {
+        { 3, 3, 12, 8, 2 },                                // windshield (inside the 2 px outline: 18 x 22)
+        { 2, 15, 4, 3, 1 }, { 12, 15, 4, 3, 1 },           // headlights
+    };
+    for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
+        lv_obj_t *p = lv_obj_create(b);
+        lv_obj_remove_style_all(p);
+        lv_obj_set_pos(p, parts[i].x, parts[i].y);
+        lv_obj_set_size(p, parts[i].w, parts[i].h);
+        lv_obj_set_style_radius(p, parts[i].r, 0);
+        lv_obj_set_style_bg_color(p, i ? lv_color_hex(0xFFF2B0) : lv_color_hex(0x16323A), 0);
+        lv_obj_set_style_bg_opa(p, LV_OPA_COVER, 0);
+        lv_obj_remove_flag(p, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    }
+    return b;
 }
 
 static lv_obj_t *dot(lv_obj_t *parent, int size)
@@ -618,16 +664,49 @@ static bool on_screen(double lat, double lon, double *sx, double *sy)
 {
     if (!mp_view_set) return false;
     double x, y;
-    geo_world_px(lat, lon, MAP_ZOOM, &x, &y);
+    geo_world_px(lat, lon, mp_view.zoom, &x, &y);
     *sx = x - mp_view.ox;
     *sy = y - mp_view.oy;
     return true;
 }
 
+// Put a picture on view at its own scale
+static void show_picture(const map_view_t *v)
+{
+    mp_shown = *v;
+    mp_dsc.data = (const uint8_t *)v->px;
+    lv_image_cache_drop(&mp_dsc);
+    lv_image_set_src(mp_img, &mp_dsc);
+    lv_image_set_scale(mp_img, LV_SCALE_NONE);
+    lv_obj_invalidate(mp_img);
+}
+
 static void place_dot(lv_obj_t *o, double sx, double sy)
 {
-    int s = lv_obj_get_width(o);
-    lv_obj_set_pos(o, (int)lround(sx) - s / 2, (int)lround(sy) - s / 2);
+    lv_obj_set_pos(o, (int)lround(sx) - lv_obj_get_style_width(o, 0) / 2, (int)lround(sy) - lv_obj_get_style_height(o, 0) / 2);
+}
+
+// The route's path on the picture (deps_trace: its variants), when both are there
+static void map_path(void)
+{
+    int len[DEPS_TRACE_VARIANTS], nv = mp_view_set && mp_pts && mp_ll ? deps_trace(mp_ll, DEPS_TRACE_POINTS, len) : 0;
+    int src = 0, dst = 0;
+    for (int v = 0; v < DEPS_TRACE_VARIANTS; v++) {
+        if (v >= nv) { set_hidden(mp_path[v], true); continue; }
+        int first = dst;
+        for (int k = 0; k < len[v]; k++, src++) {
+            double sx = 0, sy = 0;
+            on_screen(mp_ll[2 * src], mp_ll[2 * src + 1], &sx, &sy);   // (mp_view_set: always true here)
+            bool last = k == len[v] - 1;
+            if (dst > first && !last && fabs(sx - mp_pts[dst - 1].x) < PATH_STEP && fabs(sy - mp_pts[dst - 1].y) < PATH_STEP)
+                continue;
+            mp_pts[dst].x = (lv_value_precise_t)sx;
+            mp_pts[dst].y = (lv_value_precise_t)sy;
+            dst++;
+        }
+        lv_line_set_points(mp_path[v], mp_pts + first, dst - first);
+        set_hidden(mp_path[v], dst - first < 2);
+    }
 }
 
 static void map_refresh(void)
@@ -638,27 +717,36 @@ static void map_refresh(void)
     char buf[96];
     // The picture: once the stop's place is known (its first departures reply)
     if (!mp_view_set && e.state == DEP_OK && (e.board.lat || e.board.lon)) {
-        map_show(e.board.lat, e.board.lon, &mp_view);
+        map_show(e.board.lat, e.board.lon, mp_zoom, &mp_view);
         mp_view_set = true;
-        mp_dsc.data = (const uint8_t *)mp_view.px;
-        lv_image_cache_drop(&mp_dsc);
-        lv_image_set_src(mp_img, &mp_dsc);
+        show_picture(&mp_view);
         lv_obj_remove_flag(mp_img, LV_OBJ_FLAG_HIDDEN);
+        map_path();                                       // a path already fetched (the same route's map again)
     }
     if (mp_view_set) {
         map_view_t now;
         map_status(&now);
         if (now.px == mp_view.px) {
-            if (now.done != mp_view.done || now.state != mp_view.state) {
+            mp_view = now;
+            if (mp_shown.px != mp_view.px) {
+                // A new zoom: its picture replaces the scaled one once complete (or once loading gave up)
+                if (mp_view.state != MAP_LOADING) show_picture(&mp_view);
+            } else if (now.done != mp_shown.done || now.state != mp_shown.state) {
+                mp_shown = now;
                 lv_image_cache_drop(&mp_dsc);
                 lv_obj_invalidate(mp_img);
             }
-            mp_view = now;
         }
     }
 
     snprintf(buf, sizeof(buf), "%s  %s", e.fav.route, e.state == DEP_OK ? e.board.direction : "");
-    set_text(mp_top, buf);
+    if (strcmp(lv_label_get_text(mp_top), buf)) {
+        // The text's own width, at most MAP_TITLE_W (then it wraps): a label sized to its content can't wrap
+        lv_point_t sz;
+        lv_text_get_size(&sz, buf, f_small, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        lv_obj_set_width(mp_top, LV_MIN(sz.x + 1, MAP_TITLE_W - 24) + 24);   // + the pill's padding
+        lv_label_set_text(mp_top, buf);
+    }
 
     double sx, sy;
     bool stop = e.state == DEP_OK && on_screen(e.board.lat, e.board.lon, &sx, &sy);
@@ -669,15 +757,11 @@ static void map_refresh(void)
     time_t fetched;
     bool failing;
     int nb = deps_buses(bus, RTC_BUSES_MAX, &fetched, &failing);
-    for (int k = 0; k < RTC_BUSES_MAX; k++) {
-        bool show = k < nb && on_screen(bus[k].lat, bus[k].lon, &sx, &sy);
+    for (int k = 0; k < RTC_BUSES_MAX; k++) {             // only the buses inside the round map
+        bool show = k < nb && on_screen(bus[k].lat, bus[k].lon, &sx, &sy)
+                    && hypot(sx - MAP_SIZE / 2, sy - MAP_SIZE / 2) <= MAP_VISIBLE;
         set_hidden(mp_bus[k], !show);
-        if (!show) continue;
-        double dx = sx - MAP_SIZE / 2, dy = sy - MAP_SIZE / 2;
-        bool far = geo_clamp_circle(&dx, &dy, MAP_EDGE);
-        lv_obj_set_style_bg_opa(mp_bus[k], far ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
-        lv_obj_set_style_border_color(mp_bus[k], far ? C_LIVE : C_TEXT, 0);
-        place_dot(mp_bus[k], MAP_SIZE / 2 + dx, MAP_SIZE / 2 + dy);
+        if (show) place_dot(mp_bus[k], sx, sy);
     }
 
     // The bottom line: the map or the RTC failing, else the next bus
@@ -699,6 +783,37 @@ static void map_refresh(void)
     set_text(mp_bottom, buf);
     set_color(mp_bottom, c);
     set_hidden(mp_bottom, !buf[0]);
+}
+
+// Swipe down: zoom in, up: zoom out (as weather_amoled's radar). Markers and path move to the new zoom at once; the
+// picture stays the previous one, scaled about the stop, until the new zoom's tiles are there.
+static void map_zoom(int step)
+{
+    int z = mp_zoom + step;
+    if (z < MAP_ZOOM_MIN || z > MAP_ZOOM_MAX || mp_fav < 0) return;
+    mp_zoom = z;
+    if (mp_idle) lv_timer_reset(mp_idle);                 // a touch: the map stays
+    if (!mp_view_set) return;                             // the first picture will take the new zoom
+    dep_entry_t e;
+    if (!deps_get(mp_fav, &e) || e.state != DEP_OK) return;
+    ESP_LOGI(TAG, "map zoom %d", z);
+    map_show(e.board.lat, e.board.lon, z, &mp_view);
+    if (mp_view.state != MAP_LOADING) show_picture(&mp_view);
+    else {                                                // the previous picture, scaled, meanwhile
+        int scale = (int)lround(256 * pow(2, mp_view.zoom - mp_shown.zoom));
+        lv_image_set_scale(mp_img, scale < 32 ? 32 : scale > 2048 ? 2048 : scale);
+    }
+    map_path();
+    map_refresh();
+}
+
+static void map_gesture(lv_event_t *e)
+{
+    lv_indev_t *in = lv_indev_active();
+    lv_dir_t dir = in ? lv_indev_get_gesture_dir(in) : LV_DIR_NONE;
+    if (dir == LV_DIR_BOTTOM) map_zoom(+1);
+    else if (dir == LV_DIR_TOP) map_zoom(-1);
+    if (in) lv_indev_wait_release(in);                    // its release isn't a tap (that closes the map)
 }
 
 static void map_leave(void)
@@ -725,8 +840,10 @@ static void map_open(int i)
     if (i < 0 || i >= n_favs) return;
     ESP_LOGI(TAG, "map of favourite %d", i);
     mp_fav = i;
+    mp_opened = lv_tick_get();
     mp_view_set = false;
     lv_obj_add_flag(mp_img, LV_OBJ_FLAG_HIDDEN);
+    for (int v = 0; v < DEPS_TRACE_VARIANTS; v++) lv_obj_add_flag(mp_path[v], LV_OBJ_FLAG_HIDDEN);
     deps_track(i);
     deps_show(i);                                         // its departures go on: the next bus at the bottom
     map_refresh();
@@ -763,6 +880,7 @@ static void map_create(void)
     scr_map = base_screen();
     lv_obj_add_flag(scr_map, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(scr_map, map_tapped, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_add_event_cb(scr_map, map_gesture, LV_EVENT_GESTURE, NULL);
     mp_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
     mp_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
     mp_dsc.header.w = MAP_SIZE;
@@ -771,11 +889,28 @@ static void map_create(void)
     mp_dsc.data_size = MAP_SIZE * MAP_SIZE * 2;
     mp_img = lv_image_create(scr_map);
     lv_obj_set_pos(mp_img, 0, 0);
+    lv_image_set_pivot(mp_img, MAP_SIZE / 2, MAP_SIZE / 2);   // a zoom's stand-in scales about the stop
     lv_obj_remove_flag(mp_img, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(mp_img, LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_HIDDEN);
-    mp_top = pill(scr_map, f_small, 26, 300);
+    mp_pts = heap_caps_malloc(DEPS_TRACE_POINTS * sizeof(lv_point_precise_t), MALLOC_CAP_SPIRAM);
+    mp_ll = heap_caps_malloc(2 * DEPS_TRACE_POINTS * sizeof(float), MALLOC_CAP_SPIRAM);
+    for (int v = 0; v < DEPS_TRACE_VARIANTS; v++) {       // the route's path, under everything else
+        mp_path[v] = lv_line_create(scr_map);
+        lv_obj_set_style_line_color(mp_path[v], C_ACCENT, 0);
+        lv_obj_set_style_line_width(mp_path[v], 6, 0);
+        lv_obj_set_style_line_rounded(mp_path[v], true, 0);
+        lv_obj_set_style_line_opa(mp_path[v], LV_OPA_80, 0);
+        lv_obj_remove_flag(mp_path[v], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(mp_path[v], LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_HIDDEN);
+    }
+    // The route and direction: low enough for the round screen to be ~290 px wide there (at y 26 it is ~210 px and cut
+    // "800  Colline Parlementaire"); a longer one wraps to a second line
+    mp_top = pill(scr_map, f_small, 50, MAP_TITLE_W);
+    lv_label_set_long_mode(mp_top, LV_LABEL_LONG_WRAP);
     mp_bottom = pill(scr_map, f_small, 372, 300);
-    mp_attrib = label(scr_map, f_tiny, C_DIM, 408, 200);   // OSM's licence asks for it on the map
+    mp_attrib = pill(scr_map, f_tiny, 410, 200);           // OSM's licence asks for it on the map; backed: the path
+    lv_obj_set_style_text_color(mp_attrib, C_DIM, 0);      // may cross it
+    lv_obj_set_style_pad_ver(mp_attrib, 1, 0);
     lv_label_set_text(mp_attrib, "© OpenStreetMap");
     // The markers above the texts: a bus on the edge is never hidden by them
     mp_stop = dot(scr_map, 22);                           // the stop: a blue dot in a white ring
@@ -783,11 +918,7 @@ static void map_create(void)
     lv_obj_set_style_border_width(mp_stop, 4, 0);
     lv_obj_set_style_bg_color(mp_stop, C_ACCENT, 0);
     lv_obj_set_style_bg_opa(mp_stop, LV_OPA_COVER, 0);
-    for (int k = 0; k < RTC_BUSES_MAX; k++) {             // the buses: green dots
-        mp_bus[k] = dot(scr_map, 18);
-        lv_obj_set_style_bg_color(mp_bus[k], C_LIVE, 0);
-        lv_obj_set_style_border_width(mp_bus[k], 3, 0);
-    }
+    for (int k = 0; k < RTC_BUSES_MAX; k++) mp_bus[k] = bus_icon(scr_map);   // the buses
 }
 
 /* ---------- message screen (start-up) ---------- */
