@@ -21,6 +21,7 @@
 #include "ui.h"
 #include "favs.h"
 #include "departures.h"
+#include "presence.h"
 
 static const char *TAG = "app";
 #define BOOT_BTN GPIO_NUM_0
@@ -175,6 +176,93 @@ static esp_err_t favs_post(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
+/* ---------- screen dimming (presence.c) ---------- */
+
+static float num_or(const cJSON *j, const char *key, float def)
+{
+    const cJSON *v = cJSON_GetObjectItem(j, key);
+    return cJSON_IsNumber(v) ? (float)v->valuedouble : def;
+}
+
+// weather_amoled's shape (plus "ok"): the settings, then the live state (the page polls it while open)
+static esp_err_t presence_send(httpd_req_t *req, bool ok)
+{
+    presence_cfg_t c;
+    presence_status_t st;
+    presence_get_config(&c);
+    presence_get_status(&st);
+    static const char *names[] = {"active", "dim", "off"};
+    cJSON *j = cJSON_CreateObject();
+    cJSON_AddBoolToObject(j, "ok", ok);
+    cJSON_AddBoolToObject(j, "enabled", c.enabled);
+    cJSON_AddNumberToObject(j, "margin_db", c.margin_db);
+    cJSON_AddNumberToObject(j, "wake_s", c.wake_s);
+    cJSON_AddNumberToObject(j, "dim_s", c.dim_s);
+    cJSON_AddNumberToObject(j, "off_s", c.off_s);
+    cJSON_AddNumberToObject(j, "bright_pct", c.bright_pct);
+    cJSON_AddNumberToObject(j, "dim_pct", c.dim_pct);
+    cJSON_AddNumberToObject(j, "baseline_db", c.baseline_db);
+    cJSON_AddNumberToObject(j, "level_db", st.level_db);
+    cJSON_AddNumberToObject(j, "threshold_db", st.threshold_db);
+    cJSON_AddStringToObject(j, "state", names[st.state]);
+    cJSON_AddNumberToObject(j, "wake_progress", st.wake_progress);
+    cJSON_AddNumberToObject(j, "quiet_s", st.quiet_s);
+    cJSON_AddBoolToObject(j, "calibrating", st.calibrating);
+    cJSON_AddNumberToObject(j, "calib_left_s", st.calib_left_s);
+    cJSON_AddBoolToObject(j, "mic_ok", st.mic_ok);
+    cJSON_AddNumberToObject(j, "brightness", st.brightness);
+    cJSON_AddBoolToObject(j, "imu_ok", st.imu_ok);
+    cJSON_AddNumberToObject(j, "motion_g", st.motion_g);
+    cJSON_AddBoolToObject(j, "motion_wake", presence_motion_wake());
+    cJSON_AddNumberToObject(j, "motion_thr", st.motion_thr);
+    return web_send_json(req, j);
+}
+
+// GET /api/presence: the screen dimming settings and its state
+static esp_err_t presence_get(httpd_req_t *req) { return presence_send(req, true); }
+
+// POST /api/presence with any of "enabled", "margin_db", "wake_s", "dim_s", "off_s", "bright_pct", "dim_pct",
+// "motion_wake", "motion_thr": saved, then GET's answer ("ok":false: not saved)
+static esp_err_t presence_post(httpd_req_t *req)
+{
+    cJSON *j = web_read_json(req);
+    if (!j) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    presence_cfg_t c;
+    presence_status_t ps;
+    presence_get_config(&c);
+    presence_get_status(&ps);
+    const cJSON *en = cJSON_GetObjectItem(j, "enabled");
+    if (cJSON_IsBool(en)) c.enabled = cJSON_IsTrue(en);
+    c.margin_db = num_or(j, "margin_db", c.margin_db);
+    c.wake_s = num_or(j, "wake_s", c.wake_s);
+    c.dim_s = num_or(j, "dim_s", c.dim_s);
+    c.off_s = num_or(j, "off_s", c.off_s);
+    c.bright_pct = (int)num_or(j, "bright_pct", c.bright_pct);
+    c.dim_pct = (int)num_or(j, "dim_pct", c.dim_pct);
+    const cJSON *mw = cJSON_GetObjectItem(j, "motion_wake");
+    bool saved = true;
+    if (cJSON_IsBool(mw) || cJSON_IsNumber(cJSON_GetObjectItem(j, "motion_thr")))
+        saved = presence_set_motion(cJSON_IsBool(mw) ? cJSON_IsTrue(mw) : presence_motion_wake(),
+                                    num_or(j, "motion_thr", ps.motion_thr));
+    cJSON_Delete(j);
+    saved = presence_set_config(&c) && saved;
+    return presence_send(req, saved);
+}
+
+// POST /api/calibrate {"seconds":5}: measure the room's background noise (keep quiet meanwhile). GET's answer with
+// "calibrating":true, or {"ok":false,"why":"no_mic"|"busy"} (200: a refusal is an answer)
+static esp_err_t calibrate_post(httpd_req_t *req)
+{
+    cJSON *j = web_read_json(req);
+    int secs = j ? (int)num_or(j, "seconds", 5) : 5;
+    cJSON_Delete(j);
+    presence_status_t st;
+    presence_get_status(&st);
+    if (!st.mic_ok) return httpd_resp_sendstr(req, "{\"ok\":false,\"why\":\"no_mic\"}");
+    if (!presence_calibrate(secs)) return httpd_resp_sendstr(req, "{\"ok\":false,\"why\":\"busy\"}");
+    return presence_send(req, true);
+}
+
 // The stops may be changed from the setup network too: its password on the display is the same proof as the key in
 // the settings QR code (a phone that joined it through Wi-Fi setup got 403 on "Find directions", 2026-10-06)
 static const web_route_t app_routes[] = {
@@ -182,6 +270,9 @@ static const web_route_t app_routes[] = {
     { "/api/favs",     HTTP_GET,  favs_get, .keyed = false },
     { "/api/favs",     HTTP_POST, favs_post, .keyed = true },
     { "/api/route",    HTTP_POST, route_post, .keyed = true },
+    { "/api/presence", HTTP_GET,  presence_get, .keyed = false },
+    { "/api/presence", HTTP_POST, presence_post, .keyed = true },
+    { "/api/calibrate", HTTP_POST, calibrate_post, .keyed = true },
 };
 
 // The saved network can't be reached at start-up. Setup opens by itself for AUTO_SETUP_S, then the device just
@@ -243,6 +334,8 @@ void app_main(void)
     diag_start(60);             // "diag:" lines every 60 s (heap, tasks, display)
     board_init();               // display, LVGL, touch; registers fps/tap/swipe/screen with the test console
     diag_mark("board");
+    presence_start();           // microphones and motion sensor (the board's I2C bus): dims the screen when quiet
+    touch_set_press_filter(presence_touch);   // a touch on a dark screen only wakes it (no tap, swipe, long-press)
     web_set_page(page_start, page_end);
     web_add_routes(app_routes, sizeof(app_routes) / sizeof(app_routes[0]));
     ota_start(ui_ota);          // logs "ota: Running ..."; checks once Wi-Fi is up; confirms a new image after 60 s
