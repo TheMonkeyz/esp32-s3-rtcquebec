@@ -9,7 +9,7 @@
   "baud": 460800,
   "monitor_baud": 115200,
   "screen": { "w": 466, "h": 466, "shape": "round" },
-  "screens": ["stop", "system", "setup", "setup1"],
+  "screens": ["stop", "system", "alerts", "setup", "setup1"],
   "screens_not_shown": ["setup1"],
   "setup_ssid": "RTC-Setup",
   "setup_subnet": "192.168.4",

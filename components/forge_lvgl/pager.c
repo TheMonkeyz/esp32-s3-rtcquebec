@@ -105,6 +105,26 @@ void pager_set_count(lv_obj_t *o, int n)
     if (p->cur >= n) pager_go(o, n - 1, false);
 }
 
+void pager_set_order(lv_obj_t *o, lv_obj_t *const *pages, int n)
+{
+    pager_t *p = lv_obj_get_user_data(o);
+    lv_obj_t *all[p->max];
+    int k = 0;
+    for (int i = 0; i < n && k < p->max; i++)               // the pages asked for, in that order
+        if (pager_index(o, pages[i]) >= 0) all[k++] = pages[i];
+    int shown = k;
+    for (int i = 0; i < p->max; i++) {                       // then the others, in their current order
+        bool listed = false;
+        for (int j = 0; j < shown && !listed; j++) listed = all[j] == p->page[i];
+        if (!listed) all[k++] = p->page[i];
+    }
+    for (int i = 0; i < p->max; i++) {
+        p->page[i] = all[i];
+        lv_obj_set_pos(all[i], p->vertical ? 0 : i * DISP_W, p->vertical ? i * DISP_H : 0);
+    }
+    pager_set_count(o, shown);
+}
+
 int pager_index(lv_obj_t *o, const lv_obj_t *page)
 {
     pager_t *p = lv_obj_get_user_data(o);

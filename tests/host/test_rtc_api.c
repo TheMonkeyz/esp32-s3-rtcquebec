@@ -28,6 +28,18 @@ int main(void)
     CHECK(!rtc_parse_time("2026-13-06T22:46:57-04:00", &t), "month 13");
     CHECK(!rtc_parse_time(NULL, &t), "NULL");
 
+    // The local time and offset the notices' query needs (the emulator's %z wrote local time as +00:00, 2026-10-07)
+    char iso[32];
+    struct tm lt = { .tm_year = 126, .tm_mon = 9, .tm_mday = 7, .tm_hour = 1, .tm_min = 0, .tm_sec = 12 };
+    rtc_iso_local(1791349212, &lt, iso, sizeof(iso));                 // 05:00:12 UTC = 01:00:12 in Québec (EDT)
+    CHECK(!strcmp(iso, "2026-10-07T01:00:00-04:00"), "%s", iso);
+    struct tm wt = { .tm_year = 126, .tm_mon = 0, .tm_mday = 15, .tm_hour = 8 };
+    rtc_iso_local(1768482000, &wt, iso, sizeof(iso));                 // winter: -05:00
+    CHECK(!strcmp(iso, "2026-01-15T08:00:00-05:00"), "%s", iso);
+    struct tm nt2 = { .tm_year = 126, .tm_mon = 9, .tm_mday = 7, .tm_hour = 10, .tm_min = 30 };
+    rtc_iso_local(1791349200, &nt2, iso, sizeof(iso));                // 05:00 UTC shown as 10:30: +05:30
+    CHECK(!strcmp(iso, "2026-10-07T10:30:00+05:30"), "%s", iso);
+
     rtc_board_t b;
     char *s = slurp("data/rtc_board_1025_800_0.json");
     CHECK(rtc_parse_board(s, &b), "the real reply");
@@ -65,6 +77,31 @@ int main(void)
     CHECK(!rtc_reply_none("{}") && !rtc_reply_none("nullx") && !rtc_reply_none("") && !rtc_reply_none(NULL), "not none");
     CHECK(!rtc_parse_route("null", &r), "null isn't a route");
 
+    // Notices (rtcquebec.ca, 2026-10-07): route 800 had one, route 11 two
+    static rtc_notice_t nt[RTC_NOTICES_MAX];
+    s = slurp("data/rtc_notices_800.json");
+    int nn = rtc_parse_notices(s, nt, RTC_NOTICES_MAX);
+    CHECK(nn == 1, "%d notices for 800", nn);
+    CHECK(!strcmp(nt[0].title, "Arrêt De Ste-Hélène (1263) non desservi"), "%s", nt[0].title);
+    CHECK(!strcmp(nt[0].end, "indéterminée"), "struck date dropped: \"%s\"", nt[0].end);
+    CHECK(!nt[0].begin[0] && !nt[0].subtitle[0] && nt[0].urgent, "begin \"%s\"", nt[0].begin);
+    CHECK(nt[0].n_routes == 15, "%d routes", nt[0].n_routes);
+    CHECK(rtc_notice_for(&nt[0], "800", "0") && !rtc_notice_for(&nt[0], "800", "1"), "800 direction 0 only");
+    CHECK(rtc_notice_for(&nt[0], "805", "1") && !rtc_notice_for(&nt[0], "11", "0"), "805/1, not 11");
+    free(s);
+    s = slurp("data/rtc_notices_11.json");
+    nn = rtc_parse_notices(s, nt, RTC_NOTICES_MAX);
+    CHECK(nn == 2, "%d notices for 11", nn);
+    CHECK(!strcmp(nt[0].title, "Arrêt De Salaberry (1851) non desservi"), "trailing space trimmed: \"%s\"", nt[0].title);
+    CHECK(!strcmp(nt[1].begin, "10 novembre") && !strcmp(nt[1].end, "indéterminée"), "%s / %s", nt[1].begin, nt[1].end);
+    CHECK(rtc_parse_notices(s, nt, 1) == 1, "max");
+    free(s);
+    CHECK(rtc_parse_notices("{\"data\":[]}", nt, RTC_NOTICES_MAX) == 0, "none");
+    CHECK(rtc_parse_notices("{\"errors\":[{}]}", nt, RTC_NOTICES_MAX) == -1, "an error reply");
+    CHECK(rtc_parse_notices("{\"data\":[{\"id\":\"x\",\"attributes\":{\"title\":\"T\",\"description_work_end\":"
+                            "{\"value\":\"<p>Jusqu&#039;au 3&nbsp;mai &amp; plus<br>tard</p>\"}}}]}", nt, 2) == 1
+          && !strcmp(nt[0].end, "Jusqu'au 3 mai & plus tard") && nt[0].n_routes == 0, "entities: \"%s\"", nt[0].end);
+
     char url[200];
     rtc_fav_t f = { "1025", "800", "0" };
     CHECK(rtc_board_url(url, sizeof(url), &f, "20261006") && !strcmp(url,
@@ -77,5 +114,11 @@ int main(void)
     CHECK(!rtc_board_url(url, 40, &f, "20261006"), "too small");
     CHECK(rtc_route_url(url, sizeof(url), "13a", "20261006"), "letters in a route");
     CHECK(!rtc_route_url(url, sizeof(url), "8 0", "20261006"), "space");
+    static char big[2048];
+    CHECK(rtc_notices_url(big, sizeof(big), "800", "2026-10-07T00:52:00-04:00"), "notices url");
+    CHECK(strstr(big, "condition%5D%5Bvalue%5D=800&") && strstr(big, "value%5D=2026-10-07T00%3A52%3A00-04%3A00&")
+          && strstr(big, "operator%5D=%3C%3D&") && strstr(big, "IS%20NULL") && strstr(big, "page%5Blimit%5D=6"), "%s", big);
+    CHECK(!rtc_notices_url(big, sizeof(big), "8&0", "2026-10-07T00:52:00-04:00"), "bad route");
+    CHECK(!rtc_notices_url(big, 300, "800", "2026-10-07T00:52:00-04:00"), "too small");
     return check_done("rtc_api");
 }

@@ -2,13 +2,13 @@
 #include <stdbool.h>
 #include "ota.h"
 
-// The screens: one pager holding "system" (page 0) and a page per favourite stop ("stop" is the first: swipe left for
-// the next ones), "setup" (Wi-Fi setup, long-press anywhere) and "message" (start-up messages). Any task may call
-// these: they take the display lock.
+// The screens: one pager holding "system" (page 0), a page per favourite stop ("stop" is the first: swipe left for
+// the next ones) and "alerts" (last), "setup" (Wi-Fi setup, long-press anywhere) and "message" (start-up messages).
+// Any task may call these: they take the display lock.
 void ui_init(void);
 void ui_home(void);                                 // the pager, on the first stop
 void ui_favs_changed(void);                         // the favourites list changed: pages shown, texts (deps_set_favs first)
-void ui_deps_changed(int i);                        // favourite i has new departures (departures.c's task)
+void ui_deps_changed(int i);                        // favourite i has new departures, -1: new alerts (departures.c)
 void ui_message(const char *title, const char *body);
 void ui_texts_changed(void);                        // the language changed: every label again
 

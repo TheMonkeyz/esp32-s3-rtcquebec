@@ -18,15 +18,15 @@ APP_WATCH = [
 ]
 METRIC_SUITES = [('swipe_', 'perf'), ('setup_page_', 'navigation'), ('easy_connect_', 'navigation')]
 
-# The pager: system | stop | stop2 .. stop8, one page per favourite (at least "stop": without favourites it says how to
-# add some). The tests read the display's favourites and swipe through all of them.
+# The pager: system | stop | stop2 .. stop8 | alerts, one page per favourite (at least "stop": without favourites it
+# says how to add some). The tests read the display's favourites and swipe through all of them.
 HOME, NEXT = 'system', 'stop'
 
 
 def pages(ctx):
     """The pager's pages, left to right, for the favourites the display has now."""
     n = len(ctx.board.api('/api/favs').get('favs', []))
-    return [HOME, NEXT] + [f'stop{i}' for i in range(2, n + 1)]
+    return [HOME, NEXT] + [f'stop{i}' for i in range(2, n + 1)] + ['alerts']
 
 
 def go_home(ctx):

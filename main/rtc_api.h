@@ -7,6 +7,9 @@
 #include <time.h>
 
 #define RTC_API "https://api-iv.rtcquebec.ca/api/legacy"
+#define RTC_NOTICES "https://www.rtcquebec.ca/en/api/notices_v2"   // the website's notices (Drupal JSON:API)
+#define RTC_NOTICES_MAX 6                 // per route and request (page[limit])
+#define RTC_NOTICE_ROUTES 32              // route/direction pairs kept per notice
 #define RTC_DEPS_MAX 5                    // the API gives the next 5 departures
 
 // A favourite: a stop, a route and the route's direction there (all as the API writes them: "1025", "800", "0")
@@ -42,6 +45,27 @@ typedef struct {
     char dir_name[2][48];
 } rtc_route_t;
 
+// A notice on routes (rtcquebec.ca's "Avis sur les parcours"): works, detours, stops not served. Its texts are
+// RTC's, in French only.
+typedef struct {
+    char id[40];                          // the notice's UUID
+    char title[112];                      // "Arrêt De Ste-Hélène (1263) non desservi"
+    char subtitle[112];                   // often empty
+    char begin[48], end[48];              // works' start and end as RTC writes them ("10 novembre", "indéterminée")
+    bool urgent;
+    time_t start;                         // publication start (UTC)
+    int n_routes;
+    struct { char route[8]; char dir[4]; } routes[RTC_NOTICE_ROUTES];
+} rtc_notice_t;
+
+// The notices published now that name `route` (any direction), newest first. now_iso: local time with its offset,
+// "2026-10-07T00:52:00-04:00".
+bool rtc_notices_url(char *out, size_t n, const char *route, const char *now_iso);
+// Fills out[0..max-1]; returns how many, -1 if it isn't a notices reply
+int rtc_parse_notices(const char *json, rtc_notice_t *out, int max);
+// The notice names this route in this direction
+bool rtc_notice_for(const rtc_notice_t *n, const char *route, const char *dir);
+
 // date: the service day, yyyymmdd. false: the URL didn't fit.
 bool rtc_board_url(char *out, size_t n, const rtc_fav_t *f, const char *date);
 bool rtc_route_url(char *out, size_t n, const char *route, const char *date);
@@ -53,6 +77,10 @@ bool rtc_parse_route(const char *json, rtc_route_t *out);
 // A 200 reply that says "nothing here": RTC answers `null` for a route number not in use (999), where an unknown
 // one (4242) gets a 404. Callers treat it as "not found", not as a bad reply.
 bool rtc_reply_none(const char *json);
+
+// now (UTC) and its local time -> "2026-10-07T00:52:00-04:00" (seconds dropped). The offset comes from the two, not
+// from strftime's %z: Emscripten's (the emulator's) ignores TZ and wrote local time as +00:00.
+void rtc_iso_local(time_t now, const struct tm *local, char *out, size_t n);
 
 // "2026-10-06T22:46:57-04:00" -> UTC seconds; false if it isn't that shape
 bool rtc_parse_time(const char *iso, time_t *out);

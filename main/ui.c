@@ -5,6 +5,7 @@
 #include <time.h>
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_app_desc.h"
@@ -30,6 +31,7 @@ static const char *TAG = "ui";
 #define C_ACCENT lv_color_hex(0x4DA3FF)
 #define C_LIVE   lv_color_hex(0x5BD68A)       // a real-time departure
 #define C_BAD    lv_color_hex(0xFF6B6B)
+#define C_WARN   lv_color_hex(0xFFB547)       // an alert
 
 #ifdef EMU_BUILD                             // the browser emulator (web/emu): the font is an array, its end a pointer
 extern const uint8_t ttf_start[];
@@ -177,12 +179,14 @@ static void system_refresh(void)
  * (departures.c fetches the page on view every 30 s). */
 
 typedef struct {
-    lv_obj_t *clock, *badge, *route, *dir, *stop, *big, *kind, *next[3], *status;
+    lv_obj_t *page;                           // its page of the pager (pager_set_order moves pages, not this)
+    lv_obj_t *clock, *badge, *route, *dir, *stop, *big, *kind, *next[3], *status, *alert;
 } stop_page_t;
 static stop_page_t sp[FAVS_MAX];
 static lv_obj_t *empty_title, *empty_how;     // page 1 without favourites
+static lv_obj_t *al_page;                     // the alerts page: always the last one shown
 
-static lv_obj_t *page_of(int i) { return pager_page(pager, 1 + i); }
+static lv_obj_t *page_of(int i) { return sp[i].page; }
 
 static void set_color(lv_obj_t *l, lv_color_t c)
 {
@@ -289,6 +293,130 @@ static void stop_refresh(int i)
     }
     set_text(p->status, buf);
     set_color(p->status, sc);
+
+    int na = deps_alerts_for(i);                          // details on the alerts page, the last one
+    if (na == 1) snprintf(buf, sizeof(buf), "%s", tr(T_STOP_ALERT1));
+    else if (na > 1) snprintf(buf, sizeof(buf), tr(T_STOP_ALERTS), na);
+    set_text(p->alert, na ? buf : "");
+}
+
+/* ---------- alerts page ----------
+ * RTC's notices for the favourite routes in their directions (departures.c fetches each route's every 10 min): the
+ * routes concerned on a badge, the title (orange when RTC marks it urgent), the subtitle, start and end as RTC writes
+ * them. A list that scrolls up and down when it doesn't fit; rebuilt only when the alerts change. */
+
+static lv_obj_t *al_title, *al_list, *al_none, *al_status;
+static EXT_RAM_BSS_ATTR dep_alert_t al[DEPS_ALERTS_MAX];
+static char al_sig[DEPS_ALERTS_MAX * 40 + 8];         // what the list shows now (ids, language)
+
+static lv_obj_t *al_label(lv_obj_t *parent, lv_font_t *f, lv_color_t c, int w)
+{
+    lv_obj_t *l = lv_label_create(parent);
+    lv_obj_set_style_text_font(l, f, 0);
+    lv_obj_set_style_text_color(l, c, 0);
+    lv_obj_set_width(l, w);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    lv_obj_remove_flag(l, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(l, LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
+    return l;
+}
+
+static lv_obj_t *al_box(lv_obj_t *parent, lv_flex_flow_t flow)
+{
+    lv_obj_t *o = lv_obj_create(parent);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_flex_flow(o, flow);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(o, LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
+    return o;
+}
+
+static void alerts_refresh(void)
+{
+    time_t fetched;
+    bool failing;
+    int n = deps_alerts(al, DEPS_ALERTS_MAX, &fetched, &failing);
+    set_text(al_title, tr(T_ALERTS));
+
+    char sig[sizeof(al_sig)];
+    int k = snprintf(sig, sizeof(sig), "%d:", (int)i18n_lang());
+    for (int i = 0; i < n && k < (int)sizeof(sig) - 40; i++) k += snprintf(sig + k, sizeof(sig) - k, "%.36s,", al[i].n.id);
+    if (strcmp(sig, al_sig)) {                            // rebuild the list
+        strlcpy(al_sig, sig, sizeof(al_sig));
+        lv_obj_clean(al_list);
+        lv_obj_scroll_to_y(al_list, 0, LV_ANIM_OFF);
+        for (int i = 0; i < n; i++) {
+            const rtc_notice_t *x = &al[i].n;
+            lv_obj_t *row = al_box(al_list, LV_FLEX_FLOW_ROW);
+            lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
+            lv_obj_set_style_pad_column(row, 10, 0);
+            lv_obj_set_style_pad_bottom(row, 16, 0);
+            lv_obj_t *badge = al_box(row, LV_FLEX_FLOW_ROW);
+            lv_obj_set_size(badge, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+            lv_obj_set_style_bg_color(badge, C_ACCENT, 0);
+            lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+            lv_obj_set_style_radius(badge, 6, 0);
+            lv_obj_set_style_pad_hor(badge, 6, 0);
+            lv_obj_t *r = al_label(badge, f_small, C_BG, LV_SIZE_CONTENT);
+            lv_label_set_long_mode(r, LV_LABEL_LONG_CLIP);
+            lv_label_set_text(r, al[i].routes);
+            lv_obj_t *col = al_box(row, LV_FLEX_FLOW_COLUMN);
+            lv_obj_set_flex_grow(col, 1);
+            lv_obj_set_height(col, LV_SIZE_CONTENT);
+            char t[240], line[120];
+            textfit(x->title, t, sizeof(t));
+            if (x->subtitle[0]) {
+                char s[120];
+                textfit(x->subtitle, s, sizeof(s));
+                strlcat(t, "\n", sizeof(t));
+                strlcat(t, s, sizeof(t));
+            }
+            lv_label_set_text(al_label(col, f_small, x->urgent ? C_WARN : C_TEXT, lv_pct(100)), t);
+            line[0] = 0;
+            if (x->begin[0]) snprintf(line, sizeof(line), tr(T_ALERT_BEGIN), x->begin);
+            if (x->end[0]) {
+                char e[64];
+                snprintf(e, sizeof(e), tr(T_ALERT_END), x->end);
+                if (line[0]) strlcat(line, "\n", sizeof(line));
+                strlcat(line, e, sizeof(line));
+            }
+            if (line[0]) {
+                char lf[120];
+                textfit(line, lf, sizeof(lf));
+                lv_label_set_text(al_label(col, f_small, C_DIM, lv_pct(100)), lf);
+            }
+        }
+    }
+    time_t now = time(NULL);
+    set_hidden(al_none, n > 0 || !fetched);
+    set_text(al_none, tr(T_ALERTS_NONE));
+    char buf[64];
+    lv_color_t sc = C_DIM;
+    if (failing && (!fetched || now - fetched > 30 * 60)) { snprintf(buf, sizeof(buf), "%s", tr(T_DEP_OFFLINE)); sc = C_BAD; }
+    else if (!fetched) snprintf(buf, sizeof(buf), "%s", n_favs ? tr(T_DEP_LOADING) : "");
+    else {
+        char at[8];
+        hhmm(fetched, at, sizeof(at));
+        snprintf(buf, sizeof(buf), tr(T_DEP_UPDATED), at);
+    }
+    set_text(al_status, buf);
+    set_color(al_status, sc);
+}
+
+static void alerts_create(lv_obj_t *pg)
+{
+    al_page = pg;
+    al_title = label(pg, f_mid, C_ACCENT, 36, 300);
+    al_list = lv_obj_create(pg);                          // scrolls up and down (a swipe sideways is the pager's)
+    lv_obj_remove_style_all(al_list);
+    lv_obj_set_size(al_list, 340, 290);
+    lv_obj_align(al_list, LV_ALIGN_TOP_MID, 0, 86);
+    lv_obj_set_flex_flow(al_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_scroll_dir(al_list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(al_list, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_add_flag(al_list, LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
+    al_none = label(pg, f_small, C_DIM, 200, 320);
+    al_status = label(pg, f_small, C_DIM, 392, 300);
 }
 
 static void empty_refresh(void)
@@ -309,6 +437,7 @@ static void stops_refresh(void)
 {
     empty_refresh();
     for (int i = 0; i < n_favs; i++) stop_refresh(i);
+    alerts_refresh();
 }
 
 // Every second, every page: the ones not shown too, because a swipe shows a picture of a neighbour rendered in the
@@ -329,8 +458,10 @@ static int fav_shown(void)                    // the favourite on view, -1 if no
 
 static void page_settled(int page, void *user)
 {
-    ESP_LOGI(TAG, "page %d (%s)", page, page ? "stop" : "system");
+    bool alerts = pager_page(pager, page) == al_page;
+    ESP_LOGI(TAG, "page %d (%s)", page, page == 0 ? "system" : alerts ? "alerts" : "stop");
     if (page == 0) system_refresh();
+    else if (alerts) alerts_refresh();
     else if (page <= n_favs) stop_refresh(page - 1);
     deps_show(fav_shown());
 }
@@ -338,6 +469,7 @@ static void page_settled(int page, void *user)
 static void stop_create(int i, lv_obj_t *pg)
 {
     stop_page_t *p = &sp[i];
+    p->page = pg;
     p->clock = label(pg, f_small, C_DIM, 22, 120);
     p->badge = lv_obj_create(pg);                         // the route number on the accent colour
     lv_obj_remove_style_all(p->badge);
@@ -367,12 +499,24 @@ static void stop_create(int i, lv_obj_t *pg)
         lv_obj_align(p->next[k], LV_ALIGN_TOP_MID, (k - 1) * 130, 300);
     }
     p->status = label(pg, f_small, C_DIM, 360, 320);
+    p->alert = label(pg, f_small, C_WARN, 392, 290);
+}
+
+// The pages shown, in order: system, the favourites' (at least one: it says how to add some), the alerts
+static void pages_order(void)
+{
+    lv_obj_t *order[2 + FAVS_MAX];
+    int k = 0;
+    order[k++] = pager_page(pager, 0);
+    for (int i = 0; i < (n_favs ? n_favs : 1); i++) order[k++] = sp[i].page;
+    order[k++] = al_page;
+    pager_set_order(pager, order, k);
 }
 
 static void main_create(void)
 {
     scr_main = base_screen();
-    pager = pager_create(scr_main, false, 1 + FAVS_MAX, NULL, page_settled, NULL);
+    pager = pager_create(scr_main, false, 2 + FAVS_MAX, NULL, page_settled, NULL);   // system, stops, alerts
     lv_obj_add_event_cb(pager, long_pressed, LV_EVENT_LONG_PRESSED, NULL);
     slide_pager(pager);                                   // drags drawn as pictures (~60 fps), not LVGL scrolling
     lv_obj_t *p0 = pager_page(pager, 0);
@@ -381,10 +525,11 @@ static void main_create(void)
     s_qr = make_qr(p0, 92);
     lv_obj_align(s_qr, LV_ALIGN_TOP_MID, 0, 262);
     s_scan = label(p0, f_small, C_DIM, 372, 300);   // y 372 + 2 lines: still inside the circle
-    for (int i = 0; i < FAVS_MAX; i++) stop_create(i, page_of(i));
+    for (int i = 0; i < FAVS_MAX; i++) stop_create(i, pager_page(pager, 1 + i));
+    alerts_create(pager_page(pager, 1 + FAVS_MAX));
     empty_title = label(page_of(0), f_mid, C_ACCENT, 140, 340);
     empty_how = label(page_of(0), f_small, C_TEXT, 200, 360);
-    pager_set_count(pager, 2);                            // ui_favs_changed() shows as many as there are favourites
+    pages_order();                                        // ui_favs_changed() shows as many as there are favourites
     empty_refresh();
     system_refresh();
     lv_timer_create(tick, 1000, NULL);
@@ -397,7 +542,7 @@ void ui_favs_changed(void)
     while (n < FAVS_MAX && deps_get(n, &e)) n++;
     display_lock(-1);
     n_favs = n;
-    pager_set_count(pager, 1 + (n ? n : 1));
+    pages_order();
     stops_refresh();
     display_unlock();
     deps_show(fav_shown());
@@ -407,7 +552,8 @@ void ui_favs_changed(void)
 void ui_deps_changed(int i)
 {
     display_lock(-1);
-    if (i < n_favs) stop_refresh(i);
+    if (i < 0) stops_refresh();                           // alerts: their page and every stop's line
+    else if (i < n_favs) stop_refresh(i);
     display_unlock();
 }
 
@@ -758,6 +904,20 @@ static void prep_setup(void)                         // texts only: no access po
     }
 STOP_N(2) STOP_N(3) STOP_N(4) STOP_N(5) STOP_N(6) STOP_N(7) STOP_N(8)
 #define STOP_DEF(n) { "stop" #n, get_stop##n, show_stop##n, stops_refresh, shown_stop##n }
+
+static lv_obj_t *get_alerts(void) { return al_page; }
+static bool shown_alerts(void)
+{
+    return lv_screen_active() == scr_main && pager_page(pager, pager_current(pager)) == al_page;
+}
+static void show_alerts(void)
+{
+    su_leave();
+    alerts_refresh();
+    pager_go(pager, pager_index(pager, al_page), false);
+    lv_screen_load(scr_main);
+    deps_show(-1);
+}
 _Static_assert(FAVS_MAX == 8, "one STOP_N per favourite page");
 
 static const screen_def_t screens[] = {
@@ -766,6 +926,7 @@ static const screen_def_t screens[] = {
     { "setup",   get_setup,  show_setup,  prep_setup,     shown_setup },
     { "setup1",  get_setup1, show_setup1, prep_setup,     shown_setup1 },
     STOP_DEF(2), STOP_DEF(3), STOP_DEF(4), STOP_DEF(5), STOP_DEF(6), STOP_DEF(7), STOP_DEF(8),
+    { "alerts",  get_alerts, show_alerts, stops_refresh,  shown_alerts },
     { "message", get_msg,    NULL,        NULL,           shown_msg },
 };
 

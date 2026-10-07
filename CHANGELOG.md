@@ -8,6 +8,9 @@ How to write an entry: add a `## vX.Y.Z - YYYY-MM-DD` section at the top **befor
 `- ` line per change, written for the person holding the display. Release candidates get their own
 `## vX.Y.Z-rc.N - YYYY-MM-DD` section, shown only to Beta users; the final release's section lists everything again.
 
+## v0.2.0-rc.1 - 2026-10-07
+- Service alerts: swipe past your last stop for the RTC's current notices about your routes (works, detours, stops not served), with when they end. A stop page says when an alert applies to it.
+
 ## v0.1.1 - 2026-10-07
 - Adding a stop: a route number that isn't in use (like 999) now says the route doesn't exist, instead of "The RTC didn't answer".
 - Try the display in your browser from the installer page: its own screens and settings page, with live departures for two stops.

@@ -31,8 +31,10 @@ locking rule for LVGL calls from outside the LVGL task. -->
 ## Screens
 
 One pager (`ui.c`, forge_lvgl's pager with slide.c drags): **system** (page 0) | **stop** (page 1) | the other
-favourites (pages 2..8). It holds 1 + `FAVS_MAX` (8) pages, built once; `pager_set_count()` (added to forge_lvgl on
-2026-10-06) shows 1 + max(1, favourites) of them, so a swipe never reaches an unused page. The display opens on the
+favourites (**stop2**..**stop8**) | **alerts** (last). It holds 2 + `FAVS_MAX` (8) pages, built once;
+`pager_set_order()` (added to forge_lvgl on 2026-10-07, on top of `pager_set_count()`) shows system, max(1,
+favourites) stop pages and the alerts page, the others hidden after them, so a swipe never reaches an unused page.
+Stop pages are found by their object (`sp[i].page`), not by index. The display opens on the
 first stop; swipe right for the system page. Long-press anywhere: Wi-Fi setup (espforge).
 
 - **stop pages** (`stop_create` / `stop_refresh`): clock at the top; the route number on an accent badge; the
@@ -43,6 +45,14 @@ first stop; swipe right for the system page. Long-press anywhere: Wi-Fi setup (e
   "Drop-off only". Minutes count down from the departure times every second between fetches; a departure gone for
   30 s disappears; data older than 10 min shows "--" rather than times that may be wrong.
 - **stop without favourites**: page 1 says to add stops on the settings page (swipe right, scan the code).
+- **stop pages' alert line** (orange, y 392): "1 alert for this route" / "N alerts..." when a notice names the
+  favourite's route in its direction (`deps_alerts_for`).
+- **alerts** (`alerts_create` / `alerts_refresh`): RTC's notices for the favourite routes in their directions,
+  deduplicated, urgent first then newest, at most 12: the favourite routes concerned on a badge, the title (orange
+  when RTC marks it urgent) and subtitle, "Start: ..." / "End: ..." as RTC writes them (French: RTC publishes its
+  notices in French only). A list that scrolls up and down (sideways is the pager's); rebuilt only when the notices
+  or the language change (a signature of their ids). Status line: "Updated at", or "Can't reach the RTC" after 30 min
+  of failures. Empty: "No alerts for your routes".
 - **system**: espforge's page (version, Wi-Fi, address, memory, uptime, updates, settings QR code).
 
 Every second the `tick` timer refreshes every stop page, the ones not shown too (a swipe shows a neighbour's picture
@@ -78,8 +88,20 @@ Decided 2026-10-06 (user): **the display calls RTC's web API directly**, for per
   `rtc_quebec/<version> (+https://github.com/TheMonkeyz/esp32-s3-rtcquebec)`. Timeout 10 s.
 - Everything that knows the API's shape is in `rtc_api.c` / `rtc_api.h`: when RTC changes it, that file and its
   test data change, nothing else.
-- To investigate: service alerts and vehicle positions (live map) endpoints; map tiles (weather_amoled shows
-  OpenStreetMap tiles: check the tile usage policy).
+- **Service alerts**: the website's own Drupal JSON:API, seen in its home page's requests (2026-10-07):
+  `https://www.rtcquebec.ca/en/api/notices_v2` (only under `/en/`; `/fr/api` is a 404). The display asks per route
+  (`rtc_notices_url`): published (`status`), started (`date_notice_start <= now`), not ended (`date_notice_end >
+  now` OR null), naming the route (`parcours.routes.name`), newest first, 6 at most, only the fields it shows
+  (title, subtitle, start/end, `description_work_begin` / `_end` (short HTML), `urgent`) and the related
+  `paragraph--avis_parcours` -> `taxonomyTermsRoutes` (`name` = route number, `code_direction`). The query is
+  ~1.3 KB (esp_http_client's send buffer is raised to 2 KB); a reply is ~1.4 KB with no notice, ~13 KB for one
+  notice naming 15 routes (most of it JSON:API links); `Cache-Control: max-age=60`; CORS echoes the page's origin
+  (the emulator works). Every 10 min per distinct favourite route (`DEPS_ALERTS_S`), only when no departures are
+  due. `rtc_parse_notices` (host test on replies saved 2026-10-07, `tests/host/data/rtc_notices_*.json`) keeps the
+  route/direction pairs; `rtc_notice_for` matches a favourite. Struck-out text in the HTML (`<s>25 septembre</s> /
+  indéterminée`: a date replaced) is dropped.
+- To investigate: vehicle positions (live map) endpoint; map tiles (weather_amoled shows OpenStreetMap tiles: check
+  the tile usage policy).
 
 ## Settings and web API
 

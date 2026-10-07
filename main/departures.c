@@ -12,12 +12,14 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
+#include "esp_attr.h"
 #include "http_once.h"
 #include "svc.h"
 #include "net.h"
 
 static const char *TAG = "deps";
 #define RX_CAP 4096                     // a reply is ~1.1 KB (5 departures)
+#define NOTICES_CAP (128 * 1024)        // a route's notices: ~13 KB for one notice naming 15 routes; 6 at most
 #define GAP_MS 2000                     // between two requests
 
 static SemaphoreHandle_t mu;            // entries, n, shown, job
@@ -27,6 +29,18 @@ static int n_ent, shown = -1;
 static TaskHandle_t task;
 static void (*on_changed)(int i);
 static int svc_rtc = -1;
+
+// The notices of each distinct favourite route (under mu)
+typedef struct {
+    char route[8];
+    int64_t tried;                      // esp_timer µs, 0 = never
+    time_t fetched;                     // last good reply (UTC), 0 = never
+    bool failing;
+    int n;
+    rtc_notice_t nt[RTC_NOTICES_MAX];
+} route_alerts_t;
+static EXT_RAM_BSS_ATTR route_alerts_t ra[FAVS_MAX];
+static int n_ra;
 
 // A lookup for the settings page, run by the task (one at a time: job_mu)
 typedef struct {
@@ -73,6 +87,7 @@ static int get(const char *url, char *buf, int cap, bool (*parse)(const char *, 
     esp_http_client_config_t cfg = {
         .url = url, .event_handler = http_evt, .user_data = &rx, .user_agent = svc_user_agent(),
         .crt_bundle_attach = esp_crt_bundle_attach, .timeout_ms = 10000,
+        .buffer_size_tx = 2048,         // the notices' query is ~1.3 KB (the default 512 can't send it)
     };
     int64_t t0 = esp_timer_get_time();
     int status;
@@ -89,11 +104,46 @@ static int get(const char *url, char *buf, int cap, bool (*parse)(const char *, 
         svc_http(svc_rtc, err, status, t0);
         status = 0;
     }
-    ESP_LOGI(TAG, "GET %s: %d in %d ms", url + strlen(RTC_API), status, (int)((esp_timer_get_time() - t0) / 1000));
+    const char *what = !strncmp(url, RTC_API, strlen(RTC_API)) ? url + strlen(RTC_API) : "notices";
+    ESP_LOGI(TAG, "GET %s: %d, %d B in %d ms", what, status, rx.len, (int)((esp_timer_get_time() - t0) / 1000));
     return status;
 }
 
 static bool parse_board(const char *s, void *out) { return rtc_parse_board(s, out); }
+
+typedef struct { rtc_notice_t *nt; int n; } notices_t;
+static bool parse_notices(const char *s, void *out)
+{
+    notices_t *x = out;
+    x->n = rtc_parse_notices(s, x->nt, RTC_NOTICES_MAX);
+    return x->n >= 0;
+}
+
+// Local time with its offset, as the website's query has it: "2026-10-07T00:52:00-04:00"
+static bool now_iso(char *out, int n)
+{
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    if (tm.tm_year < 120 || n < 26) return false;
+    rtc_iso_local(now, &tm, out, n);
+    return true;
+}
+
+// 1 fetched, -1 failed; nt / n filled on success
+static int ask_notices(const char *route, rtc_notice_t *nt, int *n)
+{
+    char iso[32];
+    char *url = malloc(2048), *buf = heap_caps_malloc(NOTICES_CAP, MALLOC_CAP_SPIRAM);
+    int r = -1;
+    if (url && buf && now_iso(iso, sizeof(iso)) && rtc_notices_url(url, 2048, route, iso)) {
+        notices_t x = { .nt = nt };
+        if (get(url, buf, NOTICES_CAP, parse_notices, &x) == 200) { *n = x.n; r = 1; }
+    }
+    free(url);
+    free(buf);
+    return r;
+}
 static bool parse_route(const char *s, void *out) { return rtc_parse_route(s, out); }
 
 // 1 found, 0 404, -1 failed
@@ -148,7 +198,27 @@ static void fetch_task(void *arg)
         int i = due(esp_timer_get_time());
         rtc_fav_t f = i >= 0 ? ent[i].fav : (rtc_fav_t){0};
         if (i >= 0) tried[i] = esp_timer_get_time();
+        int a = -1;                                           // else a route's notices, when due
+        char route[8] = "";
+        for (int k = 0; k < n_ra && i < 0 && a < 0; k++)
+            if (!ra[k].tried || esp_timer_get_time() - ra[k].tried >= DEPS_ALERTS_S * 1000000LL) a = k;
+        if (a >= 0) { ra[a].tried = esp_timer_get_time(); strlcpy(route, ra[a].route, sizeof(route)); }
         xSemaphoreGive(mu);
+        if (a >= 0) {
+            static EXT_RAM_BSS_ATTR rtc_notice_t got[RTC_NOTICES_MAX];
+            int n = 0, r = ask_notices(route, got, &n);
+            xSemaphoreTake(mu, portMAX_DELAY);
+            bool same = a < n_ra && !strcmp(ra[a].route, route);
+            if (same) {
+                ra[a].failing = r < 0;
+                if (r == 1) { ra[a].n = n; memcpy(ra[a].nt, got, n * sizeof(got[0])); ra[a].fetched = time(NULL); }
+            }
+            xSemaphoreGive(mu);
+            if (same && r == 1) ESP_LOGI(TAG, "route %s: %d notice(s)", route, n);
+            if (same && on_changed) on_changed(-1);
+            vTaskDelay(pdMS_TO_TICKS(GAP_MS));
+            continue;
+        }
         if (i < 0) continue;
 
         int r = ask_board(&f, b, buf);
@@ -202,6 +272,21 @@ void deps_set_favs(const rtc_fav_t *favs, int n)
         else { ent[i] = (dep_entry_t){ .fav = favs[i] }; tried[i] = 0; }
     }
     if (shown >= n_ent) shown = -1;
+    // The distinct routes; a route kept keeps its notices
+    static EXT_RAM_BSS_ATTR route_alerts_t old_ra[FAVS_MAX];
+    int old_n_ra = n_ra;
+    memcpy(old_ra, ra, sizeof(ra));
+    n_ra = 0;
+    for (int i = 0; i < n_ent; i++) {
+        bool seen = false;
+        for (int k = 0; k < n_ra && !seen; k++) seen = !strcmp(ra[k].route, ent[i].fav.route);
+        if (seen) continue;
+        route_alerts_t *r = &ra[n_ra++];
+        int k = 0;
+        while (k < old_n_ra && strcmp(old_ra[k].route, ent[i].fav.route)) k++;
+        if (k < old_n_ra) *r = old_ra[k];
+        else { memset(r, 0, sizeof(*r)); strlcpy(r->route, ent[i].fav.route, sizeof(r->route)); }
+    }
     xSemaphoreGive(mu);
     if (task) xTaskNotifyGive(task);
 }
@@ -223,6 +308,65 @@ bool deps_get(int i, dep_entry_t *out)
     if (ok) *out = ent[i];
     xSemaphoreGive(mu);
     return ok;
+}
+
+// Does notice nt concern favourite i (its route in its direction)?
+static bool concerns(const rtc_notice_t *nt, int i) { return rtc_notice_for(nt, ent[i].fav.route, ent[i].fav.dir); }
+
+int deps_alerts(dep_alert_t *out, int max, time_t *fetched, bool *failing)
+{
+    if (!mu) return 0;
+    xSemaphoreTake(mu, portMAX_DELAY);
+    int n = 0;
+    time_t oldest = n_ra ? time(NULL) : 0;
+    bool fail = false;
+    for (int k = 0; k < n_ra; k++) {
+        if (!ra[k].fetched) oldest = 0;
+        else if (oldest && ra[k].fetched < oldest) oldest = ra[k].fetched;
+        fail |= ra[k].failing;
+        for (int m = 0; m < ra[k].n; m++) {
+            const rtc_notice_t *nt = &ra[k].nt[m];
+            int dup = -1;
+            for (int d = 0; d < n && dup < 0; d++) if (!strcmp(out[d].n.id, nt->id)) dup = d;
+            char routes[40] = "";                             // the favourite routes it concerns
+            for (int i = 0; i < n_ent; i++) {
+                if (!concerns(nt, i) || strstr(routes, ent[i].fav.route)) continue;
+                if (routes[0]) strlcat(routes, "  ", sizeof(routes));
+                strlcat(routes, ent[i].fav.route, sizeof(routes));
+            }
+            if (!routes[0] || dup >= 0) continue;
+            if (n == max) continue;
+            out[n].n = *nt;
+            strlcpy(out[n].routes, routes, sizeof(out[n].routes));
+            n++;
+        }
+    }
+    xSemaphoreGive(mu);
+    // Urgent first, then newest
+    for (int a = 1; a < n; a++)
+        for (int b = a; b > 0; b--) {
+            const rtc_notice_t *x = &out[b - 1].n, *y = &out[b].n;
+            bool swap = (y->urgent && !x->urgent) || (y->urgent == x->urgent && y->start > x->start);
+            if (!swap) break;
+            dep_alert_t t = out[b];
+            out[b] = out[b - 1];
+            out[b - 1] = t;
+        }
+    if (fetched) *fetched = oldest;
+    if (failing) *failing = fail;
+    return n;
+}
+
+int deps_alerts_for(int i)
+{
+    if (!mu) return 0;
+    xSemaphoreTake(mu, portMAX_DELAY);
+    int n = 0;
+    for (int k = 0; i >= 0 && i < n_ent && k < n_ra; k++)
+        if (!strcmp(ra[k].route, ent[i].fav.route))
+            for (int m = 0; m < ra[k].n; m++) n += concerns(&ra[k].nt[m], i);
+    xSemaphoreGive(mu);
+    return n;
 }
 
 static int run_job(job_t *j)

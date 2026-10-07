@@ -20,6 +20,14 @@ X(T_DEP_NOT_FOUND,  "Route %s doesn't stop here\nin this direction",
                     "Le parcours %s ne s'arrête pas ici\ndans cette direction")
 X(T_DEP_NOT_SERVED, "Stop not served for now",     "Arrêt non desservi pour le moment")
 X(T_DEP_DROP_OFF,   "Drop-off only",               "Descente seulement")
+X(T_STOP_ALERT1,    "1 alert for this route",      "1 avis pour ce parcours")
+X(T_STOP_ALERTS,    "%d alerts for this route",    "%d avis pour ce parcours")
+
+// The alerts page (RTC's notices for the favourite routes; their texts are RTC's, in French)
+X(T_ALERTS,         "Alerts",                      "Avis")
+X(T_ALERTS_NONE,    "No alerts for your routes",   "Aucun avis pour vos parcours")
+X(T_ALERT_BEGIN,    "Start: %s",                   "Début : %s")
+X(T_ALERT_END,      "End: %s",                     "Fin : %s")
 X(T_NO_STOPS,       "No stops yet",                "Aucun arrêt")
 X(T_NO_STOPS_HOW,   "Add your stops on the\nsettings page: swipe right,\nthen scan the code",
                     "Ajoutez vos arrêts dans\nles réglages : glissez à droite,\npuis balayez le code")

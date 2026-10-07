@@ -46,6 +46,16 @@ static long days_from_civil(int y, int m, int d)
     return era * 146097 + doe - 719468;
 }
 
+void rtc_iso_local(time_t now, const struct tm *l, char *out, size_t n)
+{
+    long as_utc = days_from_civil(l->tm_year + 1900, l->tm_mon + 1, l->tm_mday) * 86400L
+                  + l->tm_hour * 3600L + l->tm_min * 60L + l->tm_sec;
+    long off = (as_utc - (long)now) / 60;                     // minutes east of UTC (-240 in Québec in summer)
+    long a = off < 0 ? -off : off;
+    snprintf(out, n, "%04d-%02d-%02dT%02d:%02d:00%c%02ld:%02ld", l->tm_year + 1900, l->tm_mon + 1, l->tm_mday,
+             l->tm_hour, l->tm_min, off < 0 ? '-' : '+', a / 60, a % 60);
+}
+
 bool rtc_parse_time(const char *iso, time_t *out)
 {
     int y, mo, d, h, mi, s, oh, om, used = 0;
@@ -98,6 +108,157 @@ bool rtc_parse_board(const char *json, rtc_board_t *out)
     cJSON_Delete(j);
     if (!ok) memset(out, 0, sizeof(*out));
     return ok;
+}
+
+/* ---------- notices (rtcquebec.ca's Drupal JSON:API) ---------- */
+
+// The website's own query (seen on rtcquebec.ca, 2026-10-07): published, started, not ended (or no end), naming the
+// route, newest first, only the fields and related items the display uses
+bool rtc_notices_url(char *out, size_t n, const char *route, const char *now_iso)
+{
+    if (!all(route, 1, 5, isalnum) || strlen(now_iso) != 25) return false;
+    char t[48];                                               // ':' and '+' percent-encoded
+    int k = 0;
+    for (const char *s = now_iso; *s && k < (int)sizeof(t) - 4; s++) {
+        if (*s == ':') { memcpy(t + k, "%3A", 3); k += 3; }
+        else if (*s == '+') { memcpy(t + k, "%2B", 3); k += 3; }
+        else t[k++] = *s;
+    }
+    t[k] = 0;
+    // Plain pieces around the values (they hold "%5B": never a printf format)
+#define F "&filter%5B"
+#define C "%5D%5Bcondition%5D%5B"
+    static const char p0[] = RTC_NOTICES "?filter%5Br" C "path%5D=parcours.routes.name" F "r" C "value%5D=";
+    static const char p1[] = F "st" C "path%5D=status" F "st" C "value%5D=1"
+        F "s" C "path%5D=date_notice_start" F "s" C "operator%5D=%3C%3D" F "s" C "value%5D=";
+    static const char p2[] = F "eg%5D%5Bgroup%5D%5Bconjunction%5D=OR"
+        F "e" C "path%5D=date_notice_end" F "e" C "operator%5D=%3E" F "e" C "memberOf%5D=eg" F "e" C "value%5D=";
+    static const char p3[] = F "en" C "path%5D=date_notice_end" F "en" C "operator%5D=IS%20NULL" F "en" C "memberOf%5D=eg"
+        "&fields%5Bnotices_v2%5D=title%2Csubtitle%2Cparcours%2Cdate_notice_start%2Cdate_notice_end"
+        "%2Cdescription_work_begin%2Cdescription_work_end%2Curgent"
+        "&fields%5Bparagraph--avis_parcours%5D=routes&fields%5BtaxonomyTermsRoutes%5D=name%2Ccode_direction"
+        "&include=parcours.routes&sort=-date_notice_start&page%5Blimit%5D=";
+#undef F
+#undef C
+    int len = snprintf(out, n, "%s%s%s%s%s%s%s%d", p0, route, p1, t, p2, t, p3, RTC_NOTICES_MAX);
+    return len > 0 && (size_t)len < n;
+}
+
+// RTC's short HTML ("<p><s>25 septembre</s> / indéterminée</p>") as plain text: struck-out parts dropped (a date
+// replaced by a new one), tags removed, a few entities decoded, a leading " / " left by the dropped part trimmed
+static void html_text(const char *h, char *out, size_t n)
+{
+    size_t k = 0;
+    int strike = 0;
+    for (const char *s = h; s && *s && k + 1 < n; ) {
+        if (*s == '<') {
+            if (!strncmp(s, "<s>", 3) || !strncmp(s, "<del>", 5) || !strncmp(s, "<strike>", 8)) strike++;
+            else if ((!strncmp(s, "</s>", 4) || !strncmp(s, "</del>", 6) || !strncmp(s, "</strike>", 9)) && strike) strike--;
+            else if ((!strncmp(s, "<br", 3) || !strncmp(s, "</p>", 4)) && k && out[k - 1] != ' ' && !strike) out[k++] = ' ';
+            const char *e = strchr(s, '>');
+            s = e ? e + 1 : s + strlen(s);
+            continue;
+        }
+        static const struct { const char *ent, *txt; } ents[] = {
+            { "&nbsp;", " " }, { "&amp;", "&" }, { "&quot;", "\"" }, { "&#039;", "'" }, { "&lt;", "<" }, { "&gt;", ">" },
+        };
+        bool done = false;
+        for (size_t i = 0; *s == '&' && i < sizeof(ents) / sizeof(ents[0]) && !done; i++) {
+            size_t l = strlen(ents[i].ent);
+            if (!strncmp(s, ents[i].ent, l)) {
+                if (!strike) out[k++] = ents[i].txt[0];
+                s += l;
+                done = true;
+            }
+        }
+        if (done) continue;
+        if (!strike) out[k++] = *s;
+        s++;
+    }
+    out[k] = 0;
+    char *p = out;                                            // trim: spaces and the separator a dropped date left
+    while (*p == ' ' || *p == '/') p++;
+    memmove(out, p, strlen(p) + 1);
+    for (int i = (int)strlen(out) - 1; i >= 0 && (out[i] == ' ' || out[i] == '/'); i--) out[i] = 0;
+}
+
+static const char *html_of(const cJSON *v)                   // {"value": "<p>...</p>", "processed": ...} or null
+{
+    return cJSON_GetStringValue(cJSON_GetObjectItem(v, "value"));
+}
+
+// An item of "included" by type and id
+static const cJSON *included(const cJSON *inc, const cJSON *ref)
+{
+    const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(ref, "type"));
+    const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(ref, "id"));
+    const cJSON *it;
+    if (type && id) cJSON_ArrayForEach(it, inc) {
+        const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(it, "type"));
+        const char *i = cJSON_GetStringValue(cJSON_GetObjectItem(it, "id"));
+        if (t && i && !strcmp(t, type) && !strcmp(i, id)) return it;
+    }
+    return NULL;
+}
+
+static void trim(char *s)
+{
+    char *p = s;
+    while (*p == ' ') p++;
+    memmove(s, p, strlen(p) + 1);
+    for (int i = (int)strlen(s) - 1; i >= 0 && s[i] == ' '; i--) s[i] = 0;
+}
+
+int rtc_parse_notices(const char *json, rtc_notice_t *out, int max)
+{
+    cJSON *j = cJSON_Parse(json);
+    const cJSON *data = cJSON_GetObjectItem(j, "data"), *inc = cJSON_GetObjectItem(j, "included");
+    if (!cJSON_IsArray(data)) { cJSON_Delete(j); return -1; }
+    int n = 0;
+    const cJSON *d;
+    cJSON_ArrayForEach(d, data) {
+        if (n == max) break;
+        const cJSON *a = cJSON_GetObjectItem(d, "attributes");
+        const char *title = cJSON_GetStringValue(cJSON_GetObjectItem(a, "title"));
+        const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(d, "id"));
+        if (!title || !id) continue;
+        rtc_notice_t *x = &out[n];
+        memset(x, 0, sizeof(*x));
+        snprintf(x->id, sizeof(x->id), "%s", id);
+        snprintf(x->title, sizeof(x->title), "%s", title);
+        trim(x->title);
+        const char *sub = cJSON_GetStringValue(cJSON_GetObjectItem(a, "subtitle"));
+        if (sub) { snprintf(x->subtitle, sizeof(x->subtitle), "%s", sub); trim(x->subtitle); }
+        html_text(html_of(cJSON_GetObjectItem(a, "description_work_begin")), x->begin, sizeof(x->begin));
+        html_text(html_of(cJSON_GetObjectItem(a, "description_work_end")), x->end, sizeof(x->end));
+        x->urgent = cJSON_IsTrue(cJSON_GetObjectItem(a, "urgent"));
+        rtc_parse_time(cJSON_GetStringValue(cJSON_GetObjectItem(a, "date_notice_start")), &x->start);
+        // notice -> parcours (paragraphs) -> routes (taxonomy terms: name = route number, code_direction)
+        const cJSON *pars = cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(d, "relationships"), "parcours"), "data");
+        const cJSON *p;
+        cJSON_ArrayForEach(p, pars) {
+            const cJSON *par = included(inc, p);
+            const cJSON *rs = cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(par, "relationships"), "routes"), "data");
+            const cJSON *r;
+            cJSON_ArrayForEach(r, rs) {
+                const cJSON *term = cJSON_GetObjectItem(included(inc, r), "attributes");
+                if (!term || x->n_routes == RTC_NOTICE_ROUTES) continue;
+                if (!copy(x->routes[x->n_routes].route, sizeof(x->routes[0].route), term, "name")) continue;
+                copy(x->routes[x->n_routes].dir, sizeof(x->routes[0].dir), term, "code_direction");
+                x->n_routes++;
+            }
+        }
+        n++;
+    }
+    cJSON_Delete(j);
+    return n;
+}
+
+bool rtc_notice_for(const rtc_notice_t *n, const char *route, const char *dir)
+{
+    for (int i = 0; i < n->n_routes; i++)
+        if (!strcmp(n->routes[i].route, route) && (!n->routes[i].dir[0] || !strcmp(n->routes[i].dir, dir))) return true;
+    return false;
 }
 
 bool rtc_reply_none(const char *json)
