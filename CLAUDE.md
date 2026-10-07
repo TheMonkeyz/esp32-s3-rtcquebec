@@ -46,6 +46,11 @@ local checkout `C:\Users\lmathieu\ESPDEV\espforge`). The framework components (`
 `dns_server`, `boards/`) and tools are copies: a framework bug fixed here gets ported to espforge (or a task for
 it), and espforge fixes get pulled in by hand. Keep app code in `main/`.
 
+- **espforge backlog** (the user's rule, 2026-10-07, for esp32-s3-rtcquebec, weather_amoled and espforge): when a
+  change could go into espforge (framework code, board support, tools, tests, docs, a lesson), add an entry to
+  espforge's `docs/BACKLOG.md` (`C:\Users\lmathieu\ESPDEV\espforge\docs\BACKLOG.md`, its format at the top) in the
+  same session, before calling the work done. Alignment sessions work through it for future projects.
+
 ## The app
 
 An RTC Nomade-like display for Québec City buses: favourite stops' next departures (real time), alerts, live map.
