@@ -53,6 +53,14 @@ first stop; swipe right for the system page. Long-press anywhere: Wi-Fi setup (e
   notices in French only). A list that scrolls up and down (sideways is the pager's); rebuilt only when the notices
   or the language change (a signature of their ids). Status line: "Updated at", or "Can't reach the RTC" after 30 min
   of failures. Empty: "No alerts for your routes".
+- **map** (its own screen, `map_create` / `map_refresh` in ui.c, tiles in map.c): a tap on a stop page opens it,
+  a tap anywhere closes it, and it closes by itself after 5 min without a touch. OpenStreetMap tiles at zoom 15 (~3.3
+  m a pixel, ~1.5 km across) centred on the stop (its latitude/longitude from the departures reply), dimmed as
+  weather_amoled's radar (`dim_map`), as an RGB565 `lv_image` in PSRAM; the stop a blue dot in a white ring; the
+  route's buses in the favourite's direction as green dots, and a bus beyond 200 px from the centre on that circle,
+  hollow (`geo_clamp_circle`); top: route and direction; bottom: "Next bus: 5 min" or what's wrong; "©
+  OpenStreetMap" under it (the licence). A tap within 600 ms of a page settling (or during a slide) is not a tap: a
+  second quick swipe's press reached LVGL as one and opened the map (harness quick_swipes, 2026-10-07).
 - **system**: espforge's page (version, Wi-Fi, address, memory, uptime, updates, settings QR code).
 
 Every second the `tick` timer refreshes every stop page, the ones not shown too (a swipe shows a neighbour's picture
@@ -100,8 +108,18 @@ Decided 2026-10-06 (user): **the display calls RTC's web API directly**, for per
   due. `rtc_parse_notices` (host test on replies saved 2026-10-07, `tests/host/data/rtc_notices_*.json`) keeps the
   route/direction pairs; `rtc_notice_for` matches a favourite. Struck-out text in the HTML (`<s>25 septembre</s> /
   indéterminée`: a date replaced) is dropped.
-- To investigate: vehicle positions (live map) endpoint; map tiles (weather_amoled shows OpenStreetMap tiles: check
-  the tile usage policy).
+- **Bus positions**: `RTC_API/ListeAutobus_Parcours?noParcours=800&codeDirection=0`, the website route map's own
+  call (`getBusPositions` in rtcquebec.ca's schedules.bundle.js, 2026-10-07): a JSON list of {idAutobus, latitude,
+  longitude, etatProgression, idVoyage, dateMiseJour (local, no offset)}, ~180 B a bus, `Cache-Control: max-age=20`,
+  `Access-Control-Allow-Origin: *`. Asked every 20 s (`DEPS_BUSES_S`) only while a map is open (`deps_track`), before
+  anything else the task has due. `rtc_parse_buses` (host test on a reply saved 2026-10-07) skips 0,0 positions.
+  The same script knows `ListeHoraire_Autobus?idAutobus=&idVoyage=` (a bus's next passages), unused.
+- **Map tiles**: `https://tile.openstreetmap.org/15/x/y.png` (OSM's tile usage policy: the firmware's identifying
+  User-Agent, one keep-alive connection, tiles kept while in use): 9 tiles (5-60 KB) for a 466 px picture, decoded a
+  row at a time by forge_core's `png_rows` (the ROM's inflate), the last 3 pictures kept in PSRAM (map.c,
+  `MAP_SLOTS`; ~434 KB each): reopening a stop's map downloads nothing; nothing kept across a restart (a flash
+  cache needs a partition an update over Wi-Fi can't add). Service "OpenStreetMap" in the health list. The
+  emulator fetches tiles with `fetch()` and decodes them with miniz's tinfl (web/emu/Makefile).
 
 ## Settings and web API
 

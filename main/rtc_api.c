@@ -93,6 +93,8 @@ bool rtc_parse_board(const char *json, rtc_board_t *out)
     if (ok) {
         copy(out->direction, sizeof(out->direction), parcours, "descriptionDirection");
         copy(out->stop_desc, sizeof(out->stop_desc), arret, "description");
+        const cJSON *la = cJSON_GetObjectItem(arret, "latitude"), *lo = cJSON_GetObjectItem(arret, "longitude");
+        if (cJSON_IsNumber(la) && cJSON_IsNumber(lo)) { out->lat = la->valuedouble; out->lon = lo->valuedouble; }
         out->not_served = flag(j, "arretNonDesservi");
         out->drop_off_only = flag(j, "descenteSeulement");
         const cJSON *h;
@@ -268,6 +270,35 @@ bool rtc_reply_none(const char *json)
     if (strncmp(json, "null", 4)) return false;
     for (json += 4; *json; json++) if (!isspace((unsigned char)*json)) return false;
     return true;
+}
+
+bool rtc_buses_url(char *out, size_t n, const char *route, const char *dir)
+{
+    if (!all(route, 1, 5, isalnum) || !all(dir, 1, 3, isdigit)) return false;
+    int len = snprintf(out, n, RTC_API "/ListeAutobus_Parcours?noParcours=%s&codeDirection=%s", route, dir);
+    return len > 0 && (size_t)len < n;
+}
+
+int rtc_parse_buses(const char *json, rtc_bus_t *out, int max)
+{
+    cJSON *j = cJSON_Parse(json);
+    if (!cJSON_IsArray(j)) { cJSON_Delete(j); return -1; }
+    int n = 0;
+    const cJSON *b;
+    cJSON_ArrayForEach(b, j) {
+        if (n == max) break;
+        const cJSON *la = cJSON_GetObjectItem(b, "latitude"), *lo = cJSON_GetObjectItem(b, "longitude");
+        if (!cJSON_IsNumber(la) || !cJSON_IsNumber(lo) || (la->valuedouble == 0 && lo->valuedouble == 0)) continue;
+        rtc_bus_t *x = &out[n];
+        memset(x, 0, sizeof(*x));
+        copy(x->id, sizeof(x->id), b, "idAutobus");
+        copy(x->updated, sizeof(x->updated), b, "dateMiseJour");
+        x->lat = la->valuedouble;
+        x->lon = lo->valuedouble;
+        n++;
+    }
+    cJSON_Delete(j);
+    return n;
 }
 
 bool rtc_parse_route(const char *json, rtc_route_t *out)

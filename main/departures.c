@@ -42,6 +42,15 @@ typedef struct {
 static EXT_RAM_BSS_ATTR route_alerts_t ra[FAVS_MAX];
 static int n_ra;
 
+// The buses of the favourite whose map is open (under mu)
+static int track = -1;
+static rtc_fav_t track_fav;
+static int64_t bus_tried;
+static time_t bus_fetched;
+static bool bus_failing;
+static int n_bus;
+static rtc_bus_t bus[RTC_BUSES_MAX];
+
 // A lookup for the settings page, run by the task (one at a time: job_mu)
 typedef struct {
     bool route;                         // a route's directions, else a favourite's board
@@ -110,6 +119,14 @@ static int get(const char *url, char *buf, int cap, bool (*parse)(const char *, 
 }
 
 static bool parse_board(const char *s, void *out) { return rtc_parse_board(s, out); }
+
+typedef struct { rtc_bus_t *b; int n; } buses_t;
+static bool parse_buses(const char *s, void *out)
+{
+    buses_t *x = out;
+    x->n = rtc_parse_buses(s, x->b, RTC_BUSES_MAX);
+    return x->n >= 0;
+}
 
 typedef struct { rtc_notice_t *nt; int n; } notices_t;
 static bool parse_notices(const char *s, void *out)
@@ -194,6 +211,29 @@ static void fetch_task(void *arg)
         char date[12];
         if (!net_is_connected() || !deps_date(date, sizeof(date))) continue;
 
+        // The map's buses first: someone is looking at them
+        xSemaphoreTake(mu, portMAX_DELAY);
+        bool buses = track >= 0 && (!bus_tried || esp_timer_get_time() - bus_tried >= DEPS_BUSES_S * 1000000LL);
+        rtc_fav_t tf = track_fav;
+        if (buses) bus_tried = esp_timer_get_time();
+        xSemaphoreGive(mu);
+        if (buses) {
+            static rtc_bus_t got[RTC_BUSES_MAX];
+            char url[160];
+            buses_t x = { .b = got };
+            int st = rtc_buses_url(url, sizeof(url), tf.route, tf.dir) ? get(url, buf, RX_CAP, parse_buses, &x) : -1;
+            xSemaphoreTake(mu, portMAX_DELAY);
+            bool same = track >= 0 && !memcmp(&track_fav, &tf, sizeof(tf));
+            if (same) {
+                bus_failing = st != 200;
+                if (st == 200) { n_bus = x.n; memcpy(bus, got, x.n * sizeof(got[0])); bus_fetched = time(NULL); }
+            }
+            xSemaphoreGive(mu);
+            if (same && on_changed) on_changed(DEPS_CHANGED_BUSES);
+            vTaskDelay(pdMS_TO_TICKS(GAP_MS));
+            continue;
+        }
+
         xSemaphoreTake(mu, portMAX_DELAY);
         int i = due(esp_timer_get_time());
         rtc_fav_t f = i >= 0 ? ent[i].fav : (rtc_fav_t){0};
@@ -215,7 +255,7 @@ static void fetch_task(void *arg)
             }
             xSemaphoreGive(mu);
             if (same && r == 1) ESP_LOGI(TAG, "route %s: %d notice(s)", route, n);
-            if (same && on_changed) on_changed(-1);
+            if (same && on_changed) on_changed(DEPS_CHANGED_ALERTS);
             vTaskDelay(pdMS_TO_TICKS(GAP_MS));
             continue;
         }
@@ -272,6 +312,11 @@ void deps_set_favs(const rtc_fav_t *favs, int n)
         else { ent[i] = (dep_entry_t){ .fav = favs[i] }; tried[i] = 0; }
     }
     if (shown >= n_ent) shown = -1;
+    if (track >= 0) {                                         // the map's favourite: where it is now, or gone
+        int t = -1;
+        for (int i = 0; i < n_ent && t < 0; i++) if (!memcmp(&ent[i].fav, &track_fav, sizeof(rtc_fav_t))) t = i;
+        track = t;
+    }
     // The distinct routes; a route kept keeps its notices
     static EXT_RAM_BSS_ATTR route_alerts_t old_ra[FAVS_MAX];
     int old_n_ra = n_ra;
@@ -365,6 +410,35 @@ int deps_alerts_for(int i)
     for (int k = 0; i >= 0 && i < n_ent && k < n_ra; k++)
         if (!strcmp(ra[k].route, ent[i].fav.route))
             for (int m = 0; m < ra[k].n; m++) n += concerns(&ra[k].nt[m], i);
+    xSemaphoreGive(mu);
+    return n;
+}
+
+void deps_track(int i)
+{
+    if (!mu) return;
+    xSemaphoreTake(mu, portMAX_DELAY);
+    bool same = i >= 0 && i < n_ent && track >= 0 && !memcmp(&track_fav, &ent[i].fav, sizeof(rtc_fav_t));
+    if (!same) {                                              // another route: forget the other's buses
+        n_bus = 0;
+        bus_tried = 0;
+        bus_fetched = 0;
+        bus_failing = false;
+    }
+    track = i >= 0 && i < n_ent ? i : -1;
+    if (track >= 0) track_fav = ent[i].fav;
+    xSemaphoreGive(mu);
+    if (task) xTaskNotifyGive(task);
+}
+
+int deps_buses(rtc_bus_t *out, int max, time_t *fetched, bool *failing)
+{
+    if (!mu) return 0;
+    xSemaphoreTake(mu, portMAX_DELAY);
+    int n = n_bus < max ? n_bus : max;
+    memcpy(out, bus, n * sizeof(bus[0]));
+    if (fetched) *fetched = bus_fetched;
+    if (failing) *failing = bus_failing;
     xSemaphoreGive(mu);
     return n;
 }

@@ -46,6 +46,7 @@ int main(void)
     CHECK(!strcmp(b.route, "800") && !strcmp(b.direction, "Colline Parlementaire"), "%s / %s", b.route, b.direction);
     CHECK(!strcmp(b.stop_name, "St-Dominique") && !strcmp(b.stop_desc, "Charest Est / Saint-Dominique"), "%s", b.stop_name);
     CHECK(!b.not_served && !b.drop_off_only, "flags");
+    CHECK(b.lat > 46.8158 && b.lat < 46.8159 && b.lon < -71.2176 && b.lon > -71.2177, "stop at %f %f", b.lat, b.lon);
     CHECK(b.n == 5, "%d departures", b.n);
     CHECK(b.dep[0].depart == 1791341217 && b.dep[0].live && !b.dep[0].cancelled, "first");
     CHECK(!b.dep[4].live, "the last one is the schedule's (ntr false)");
@@ -102,6 +103,18 @@ int main(void)
                             "{\"value\":\"<p>Jusqu&#039;au 3&nbsp;mai &amp; plus<br>tard</p>\"}}}]}", nt, 2) == 1
           && !strcmp(nt[0].end, "Jusqu'au 3 mai & plus tard") && nt[0].n_routes == 0, "entities: \"%s\"", nt[0].end);
 
+    // Bus positions (route 800 direction 0, 01:03 on 2026-10-07: one bus out)
+    rtc_bus_t bus[RTC_BUSES_MAX];
+    s = slurp("data/rtc_buses_800_0.json");
+    int nb = rtc_parse_buses(s, bus, RTC_BUSES_MAX);
+    CHECK(nb == 1 && !strcmp(bus[0].id, "1269") && bus[0].lat > 46.81 && bus[0].lon < -71.22, "%d %s", nb, bus[0].id);
+    CHECK(!strcmp(bus[0].updated, "2026-10-07T01:02:58"), "%s", bus[0].updated);
+    free(s);
+    CHECK(rtc_parse_buses("[]", bus, RTC_BUSES_MAX) == 0, "none out");
+    CHECK(rtc_parse_buses("[{\"idAutobus\":\"1\",\"latitude\":0,\"longitude\":0},{\"idAutobus\":2,\"latitude\":46.8,"
+                          "\"longitude\":-71.2}]", bus, RTC_BUSES_MAX) == 1 && !strcmp(bus[0].id, "2"), "0,0 skipped");
+    CHECK(rtc_parse_buses("null", bus, RTC_BUSES_MAX) == -1 && rtc_parse_buses("{}", bus, 2) == -1, "not a list");
+
     char url[200];
     rtc_fav_t f = { "1025", "800", "0" };
     CHECK(rtc_board_url(url, sizeof(url), &f, "20261006") && !strcmp(url,
@@ -114,6 +127,9 @@ int main(void)
     CHECK(!rtc_board_url(url, 40, &f, "20261006"), "too small");
     CHECK(rtc_route_url(url, sizeof(url), "13a", "20261006"), "letters in a route");
     CHECK(!rtc_route_url(url, sizeof(url), "8 0", "20261006"), "space");
+    CHECK(rtc_buses_url(url, sizeof(url), "800", "0") && !strcmp(url,
+          "https://api-iv.rtcquebec.ca/api/legacy/ListeAutobus_Parcours?noParcours=800&codeDirection=0"), "%s", url);
+    CHECK(!rtc_buses_url(url, sizeof(url), "800", "x"), "bad direction");
     static char big[2048];
     CHECK(rtc_notices_url(big, sizeof(big), "800", "2026-10-07T00:52:00-04:00"), "notices url");
     CHECK(strstr(big, "condition%5D%5Bvalue%5D=800&") && strstr(big, "value%5D=2026-10-07T00%3A52%3A00-04%3A00&")

@@ -23,6 +23,12 @@ X(T_DEP_DROP_OFF,   "Drop-off only",               "Descente seulement")
 X(T_STOP_ALERT1,    "1 alert for this route",      "1 avis pour ce parcours")
 X(T_STOP_ALERTS,    "%d alerts for this route",    "%d avis pour ce parcours")
 
+// The map screen (a tap on a stop page)
+X(T_MAP_NEXT,       "Next bus: %s",                "Prochain bus : %s")
+X(T_MAP_LOADING,    "Loading the map...",          "Chargement de la carte...")
+X(T_MAP_NO_TILES,   "Can't load the map",          "Impossible de charger la carte")
+X(T_MAP_NO_BUS,     "No bus on the way now",       "Aucun bus en route")
+
 // The alerts page (RTC's notices for the favourite routes; their texts are RTC's, in French)
 X(T_ALERTS,         "Alerts",                      "Avis")
 X(T_ALERTS_NONE,    "No alerts for your routes",   "Aucun avis pour vos parcours")

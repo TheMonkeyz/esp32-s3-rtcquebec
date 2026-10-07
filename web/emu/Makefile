@@ -16,11 +16,13 @@ MAIN := ../../main
 COMP := ../../components
 BOARD := ../../boards/ws_amoled175/board
 OUT := build
+# miniz 3.0.2 (MIT): its tinfl is what png_rows.c finds in the ESP32-S3's ROM (the map's tiles; as tests/host)
+MINIZ := $(OUT)/miniz
 VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
 
 # The firmware, unchanged: main.c runs as a task (emu_main.c), its routes serve the settings page (emu_web.c)
-FIRMWARE := main.c ui.c app_text.c rtc_api.c favs.c departures.c
-FORGE_CORE := i18n.c i18n_nvs.c textfit.c testcon_registry.c
+FIRMWARE := main.c ui.c app_text.c rtc_api.c favs.c departures.c map.c geo.c
+FORGE_CORE := i18n.c i18n_nvs.c textfit.c testcon_registry.c png_rows.c
 FORGE_LVGL := forge_lvgl.c pager.c slide.c screens.c
 FORGE_NET := svc.c
 FORGE_OTA := ota_web.c
@@ -29,7 +31,7 @@ LV_SRC := $(shell find $(LVGL)/src -name '*.c')
 
 CFLAGS := -O2 -DEMU_BUILD '-DEMU_VERSION="$(VERSION)"' -I. -Ishim -I$(MAIN) -I$(COMP)/forge_core/include \
           -I$(COMP)/forge_lvgl/include -I$(COMP)/forge_net/include -I$(COMP)/forge_ota/include -I$(BOARD)/include \
-          -I$(LVGL) -I$(LVGL)/src -I$(CJSON) \
+          -I$(LVGL) -I$(LVGL)/src -I$(CJSON) -I$(MINIZ) \
           -include string.h -include stdint.h '-DLV_CONF_KCONFIG_EXTERNAL_INCLUDE="lv_kconfig.h"' \
           -DLV_LVGL_H_INCLUDE_SIMPLE -Wno-unused-parameter
 # The firmware's local time is its TZ (main.c sets it); Emscripten's localtime_r ignores TZ (the browser's zone):
@@ -42,7 +44,7 @@ LDFLAGS := -sASYNCIFY -sASYNCIFY_STACK_SIZE=65536 -sALLOW_MEMORY_GROWTH -sSTACK_
 OBJ := $(patsubst %.c,$(OUT)/fw/%.o,$(FIRMWARE)) $(patsubst %.c,$(OUT)/forge_core/%.o,$(FORGE_CORE)) \
        $(patsubst %.c,$(OUT)/forge_lvgl/%.o,$(FORGE_LVGL)) $(patsubst %.c,$(OUT)/forge_net/%.o,$(FORGE_NET)) \
        $(patsubst %.c,$(OUT)/forge_ota/%.o,$(FORGE_OTA)) $(patsubst %.c,$(OUT)/emu/%.o,$(EMU)) \
-       $(patsubst $(LVGL)/%.c,$(OUT)/lvgl/%.o,$(LV_SRC)) $(OUT)/cjson/cJSON.o $(OUT)/emu/fonts.o
+       $(patsubst $(LVGL)/%.c,$(OUT)/lvgl/%.o,$(LV_SRC)) $(OUT)/cjson/cJSON.o $(OUT)/emu/fonts.o $(OUT)/miniz/miniz.o
 
 all: $(OUT)/emu.js $(OUT)/index.html $(OUT)/settings.html $(OUT)/emu-settings.js $(OUT)/fonts/montserrat.ttf
 
@@ -72,7 +74,7 @@ $(OUT)/emu-settings.js: emu-settings.js
 $(OUT)/fw/%.o: $(MAIN)/%.c lv_kconfig.h
 	@mkdir -p $(dir $@)
 	emcc $(CFLAGS) $(FWFLAGS) -c $< -o $@
-$(OUT)/forge_core/%.o: $(COMP)/forge_core/%.c lv_kconfig.h
+$(OUT)/forge_core/%.o: $(COMP)/forge_core/%.c lv_kconfig.h | $(MINIZ)/miniz.h
 	@mkdir -p $(dir $@)
 	emcc $(CFLAGS) -c $< -o $@
 $(OUT)/forge_lvgl/%.o: $(COMP)/forge_lvgl/%.c lv_kconfig.h
@@ -107,3 +109,12 @@ open('$@', 'w').write(f('ttf', '$(MAIN)/montserrat.ttf'))"
 clean:
 	rm -rf $(OUT)
 .PHONY: all clean
+
+# miniz for png_rows.c (see MINIZ above): downloaded once
+$(MINIZ)/miniz.c: $(MINIZ)/miniz.h
+$(MINIZ)/miniz.h:
+	@mkdir -p $(MINIZ)
+	curl -fsSL -o $(OUT)/miniz.zip https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip
+	python3 -c "import zipfile; zipfile.ZipFile('$(OUT)/miniz.zip').extractall('$(MINIZ)', ['miniz.c', 'miniz.h'])"
+$(OUT)/miniz/miniz.o: $(MINIZ)/miniz.c
+	emcc -O2 -c $< -o $@

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_attr.h"
@@ -22,6 +23,8 @@
 #include "web.h"
 #include "app_text.h"
 #include "departures.h"
+#include "map.h"
+#include "geo.h"
 
 static const char *TAG = "ui";
 
@@ -41,9 +44,14 @@ extern const uint8_t ttf_start[] asm("_binary_montserrat_ttf_start");
 extern const uint8_t ttf_end[]   asm("_binary_montserrat_ttf_end");
 #endif
 
-static lv_font_t *f_big, *f_mid, *f_small;
+static lv_font_t *f_big, *f_mid, *f_small, *f_tiny;
 static lv_obj_t *scr_main, *pager, *scr_msg, *scr_setup;
 static int n_favs;                       // favourite pages shown (pages 1..n_favs); 0: page 1 says how to add some
+static lv_obj_t *scr_map;                // the map screen (below: map_create)
+static int mp_fav = -1;
+static void map_refresh(void);
+static void map_leave(void);
+static void stop_tapped(lv_event_t *e);
 static lv_obj_t *s_title, *s_lines, *s_qr, *s_scan;
 static lv_obj_t *m_title, *m_body;
 static ota_status_t ota_st;              // last forge_ota status (copied under the display lock)
@@ -445,6 +453,8 @@ static void stops_refresh(void)
 // Changing an off-screen label costs no redraw.
 static void tick(lv_timer_t *t)
 {
+    if (mp_fav >= 0 && lv_screen_active() != scr_map) map_leave();   // left by another path (setup, the console)
+    if (lv_screen_active() == scr_map) map_refresh();
     if (lv_screen_active() != scr_main) return;
     stops_refresh();
     system_refresh();
@@ -456,8 +466,11 @@ static int fav_shown(void)                    // the favourite on view, -1 if no
     return lv_screen_active() == scr_main && p >= 1 && p <= n_favs ? p - 1 : -1;
 }
 
+static uint32_t settled_tick;                 // lv_tick of the last page settle (a tap just after is a swipe's tail)
+
 static void page_settled(int page, void *user)
 {
+    settled_tick = lv_tick_get();
     bool alerts = pager_page(pager, page) == al_page;
     ESP_LOGI(TAG, "page %d (%s)", page, page == 0 ? "system" : alerts ? "alerts" : "stop");
     if (page == 0) system_refresh();
@@ -518,6 +531,7 @@ static void main_create(void)
     scr_main = base_screen();
     pager = pager_create(scr_main, false, 2 + FAVS_MAX, NULL, page_settled, NULL);   // system, stops, alerts
     lv_obj_add_event_cb(pager, long_pressed, LV_EVENT_LONG_PRESSED, NULL);
+    lv_obj_add_event_cb(pager, stop_tapped, LV_EVENT_SHORT_CLICKED, NULL);
     slide_pager(pager);                                   // drags drawn as pictures (~60 fps), not LVGL scrolling
     lv_obj_t *p0 = pager_page(pager, 0);
     s_title = label(p0, f_mid, C_ACCENT, 40, 300);
@@ -552,9 +566,228 @@ void ui_favs_changed(void)
 void ui_deps_changed(int i)
 {
     display_lock(-1);
-    if (i < 0) stops_refresh();                           // alerts: their page and every stop's line
-    else if (i < n_favs) stop_refresh(i);
+    if (i == DEPS_CHANGED_BUSES || (i >= 0 && i == mp_fav)) map_refresh();
+    if (i == DEPS_CHANGED_ALERTS) stops_refresh();        // alerts: their page and every stop's line
+    else if (i >= 0 && i < n_favs) stop_refresh(i);
     display_unlock();
+}
+
+/* ---------- map screen ----------
+ * A tap on a stop page: the street map around the stop (map.c: OpenStreetMap tiles, dimmed), the stop at the centre,
+ * the route's buses heading the favourite's way (departures.c, every 20 s while the map is open) as green dots; a
+ * bus beyond the round edge sits on it, hollow, in its direction. A tap anywhere goes back; after MAP_IDLE_MS without
+ * a touch it goes back by itself (no positions are fetched for a map nobody looks at). */
+
+#define MAP_IDLE_MS (5 * 60 * 1000)
+#define MAP_EDGE 200                                      // a bus farther from the centre sits on this circle
+
+static lv_obj_t *mp_img, *mp_stop, *mp_top, *mp_bottom, *mp_attrib, *mp_bus[RTC_BUSES_MAX];
+static lv_image_dsc_t mp_dsc;
+// mp_fav (top of the file): the favourite whose map is open, -1 if none
+static bool mp_view_set;                                  // the picture for its stop is chosen (map_show)
+static map_view_t mp_view;
+static lv_timer_t *mp_idle;
+
+static lv_obj_t *pill(lv_obj_t *parent, lv_font_t *f, int y, int w)
+{
+    lv_obj_t *l = label(parent, f, C_TEXT, y, w);
+    lv_obj_set_width(l, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_width(l, w, 0);
+    lv_obj_set_style_bg_color(l, C_BG, 0);
+    lv_obj_set_style_bg_opa(l, LV_OPA_70, 0);
+    lv_obj_set_style_radius(l, 12, 0);
+    lv_obj_set_style_pad_hor(l, 12, 0);
+    lv_obj_set_style_pad_ver(l, 4, 0);
+    lv_obj_align(l, LV_ALIGN_TOP_MID, 0, y);
+    return l;
+}
+
+static lv_obj_t *dot(lv_obj_t *parent, int size)
+{
+    lv_obj_t *o = lv_obj_create(parent);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, size, size);
+    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(o, LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_HIDDEN);
+    return o;
+}
+
+// A place's position on the screen, relative to the picture's top-left corner; false without a picture
+static bool on_screen(double lat, double lon, double *sx, double *sy)
+{
+    if (!mp_view_set) return false;
+    double x, y;
+    geo_world_px(lat, lon, MAP_ZOOM, &x, &y);
+    *sx = x - mp_view.ox;
+    *sy = y - mp_view.oy;
+    return true;
+}
+
+static void place_dot(lv_obj_t *o, double sx, double sy)
+{
+    int s = lv_obj_get_width(o);
+    lv_obj_set_pos(o, (int)lround(sx) - s / 2, (int)lround(sy) - s / 2);
+}
+
+static void map_refresh(void)
+{
+    if (mp_fav < 0) return;
+    dep_entry_t e;
+    if (!deps_get(mp_fav, &e)) return;
+    char buf[96];
+    // The picture: once the stop's place is known (its first departures reply)
+    if (!mp_view_set && e.state == DEP_OK && (e.board.lat || e.board.lon)) {
+        map_show(e.board.lat, e.board.lon, &mp_view);
+        mp_view_set = true;
+        mp_dsc.data = (const uint8_t *)mp_view.px;
+        lv_image_cache_drop(&mp_dsc);
+        lv_image_set_src(mp_img, &mp_dsc);
+        lv_obj_remove_flag(mp_img, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (mp_view_set) {
+        map_view_t now;
+        map_status(&now);
+        if (now.px == mp_view.px) {
+            if (now.done != mp_view.done || now.state != mp_view.state) {
+                lv_image_cache_drop(&mp_dsc);
+                lv_obj_invalidate(mp_img);
+            }
+            mp_view = now;
+        }
+    }
+
+    snprintf(buf, sizeof(buf), "%s  %s", e.fav.route, e.state == DEP_OK ? e.board.direction : "");
+    set_text(mp_top, buf);
+
+    double sx, sy;
+    bool stop = e.state == DEP_OK && on_screen(e.board.lat, e.board.lon, &sx, &sy);
+    set_hidden(mp_stop, !stop);
+    if (stop) place_dot(mp_stop, sx, sy);
+
+    static rtc_bus_t bus[RTC_BUSES_MAX];
+    time_t fetched;
+    bool failing;
+    int nb = deps_buses(bus, RTC_BUSES_MAX, &fetched, &failing);
+    for (int k = 0; k < RTC_BUSES_MAX; k++) {
+        bool show = k < nb && on_screen(bus[k].lat, bus[k].lon, &sx, &sy);
+        set_hidden(mp_bus[k], !show);
+        if (!show) continue;
+        double dx = sx - MAP_SIZE / 2, dy = sy - MAP_SIZE / 2;
+        bool far = geo_clamp_circle(&dx, &dy, MAP_EDGE);
+        lv_obj_set_style_bg_opa(mp_bus[k], far ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+        lv_obj_set_style_border_color(mp_bus[k], far ? C_LIVE : C_TEXT, 0);
+        place_dot(mp_bus[k], MAP_SIZE / 2 + dx, MAP_SIZE / 2 + dy);
+    }
+
+    // The bottom line: the map or the RTC failing, else the next bus
+    time_t t = time(NULL);
+    lv_color_t c = C_TEXT;
+    if (mp_view_set && mp_view.state == MAP_FAILED && mp_view.done == 0) { snprintf(buf, sizeof(buf), "%s", tr(T_MAP_NO_TILES)); c = C_BAD; }
+    else if (!mp_view_set || (mp_view.state == MAP_LOADING && mp_view.done == 0)) snprintf(buf, sizeof(buf), "%s", tr(T_MAP_LOADING));
+    else if (failing && (!fetched || t - fetched > 2 * 60)) { snprintf(buf, sizeof(buf), "%s", tr(T_DEP_OFFLINE)); c = C_BAD; }
+    else if (fetched && nb == 0) snprintf(buf, sizeof(buf), "%s", tr(T_MAP_NO_BUS));
+    else {
+        const rtc_dep_t *d = NULL;
+        for (int k = 0; k < e.board.n && !d && e.state == DEP_OK; k++) if (e.board.dep[k].depart > t - 30) d = &e.board.dep[k];
+        if (d) {
+            char w[24];
+            when(d->depart, t, w, sizeof(w));
+            snprintf(buf, sizeof(buf), tr(T_MAP_NEXT), w);
+        } else buf[0] = 0;
+    }
+    set_text(mp_bottom, buf);
+    set_color(mp_bottom, c);
+    set_hidden(mp_bottom, !buf[0]);
+}
+
+static void map_leave(void)
+{
+    if (mp_fav < 0) return;
+    ESP_LOGI(TAG, "map closed");
+    mp_fav = -1;
+    deps_track(-1);
+    if (mp_idle) { lv_timer_delete(mp_idle); mp_idle = NULL; }
+}
+
+static void map_close(void)
+{
+    map_leave();
+    lv_screen_load_anim(scr_main, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
+    deps_show(fav_shown());
+}
+
+static void map_idle(lv_timer_t *t) { if (lv_screen_active() == scr_map) map_close(); }
+static void map_tapped(lv_event_t *e) { map_close(); }
+
+static void map_open(int i)
+{
+    if (i < 0 || i >= n_favs) return;
+    ESP_LOGI(TAG, "map of favourite %d", i);
+    mp_fav = i;
+    mp_view_set = false;
+    lv_obj_add_flag(mp_img, LV_OBJ_FLAG_HIDDEN);
+    deps_track(i);
+    deps_show(i);                                         // its departures go on: the next bus at the bottom
+    map_refresh();
+    if (mp_idle) lv_timer_delete(mp_idle);
+    mp_idle = lv_timer_create(map_idle, MAP_IDLE_MS, NULL);
+    lv_timer_set_repeat_count(mp_idle, 1);
+    lv_screen_load_anim(scr_map, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);
+    lv_indev_t *in = lv_indev_active();
+    if (in) lv_indev_wait_release(in);                    // the tap that opened it doesn't also close it
+}
+
+// A tap on a stop page opens its map (a drag is slide.c's, a long-press is Wi-Fi setup). Not within 600 ms of a page
+// settling: a second quick swipe's press can reach LVGL as a tap (harness quick_swipes, 2026-10-07: it opened the map)
+#define TAP_AFTER_SWIPE_MS 600
+static void stop_tapped(lv_event_t *e)
+{
+    if (slide_busy() || lv_tick_elaps(settled_tick) < TAP_AFTER_SWIPE_MS) {
+        ESP_LOGI(TAG, "tap %u ms after a swipe: not a tap", (unsigned)lv_tick_elaps(settled_tick));
+        return;
+    }
+    int i = fav_shown();
+    if (i >= 0) map_open(i);
+}
+
+static void map_updated(void)                             // map.c's task: a tile was drawn
+{
+    display_lock(-1);
+    if (lv_screen_active() == scr_map) map_refresh();
+    display_unlock();
+}
+
+static void map_create(void)
+{
+    scr_map = base_screen();
+    lv_obj_add_flag(scr_map, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(scr_map, map_tapped, LV_EVENT_SHORT_CLICKED, NULL);
+    mp_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+    mp_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+    mp_dsc.header.w = MAP_SIZE;
+    mp_dsc.header.h = MAP_SIZE;
+    mp_dsc.header.stride = MAP_SIZE * 2;
+    mp_dsc.data_size = MAP_SIZE * MAP_SIZE * 2;
+    mp_img = lv_image_create(scr_map);
+    lv_obj_set_pos(mp_img, 0, 0);
+    lv_obj_remove_flag(mp_img, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(mp_img, LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_HIDDEN);
+    mp_top = pill(scr_map, f_small, 26, 300);
+    mp_bottom = pill(scr_map, f_small, 372, 300);
+    mp_attrib = label(scr_map, f_tiny, C_DIM, 408, 200);   // OSM's licence asks for it on the map
+    lv_label_set_text(mp_attrib, "© OpenStreetMap");
+    // The markers above the texts: a bus on the edge is never hidden by them
+    mp_stop = dot(scr_map, 22);                           // the stop: a blue dot in a white ring
+    lv_obj_set_style_border_color(mp_stop, C_TEXT, 0);
+    lv_obj_set_style_border_width(mp_stop, 4, 0);
+    lv_obj_set_style_bg_color(mp_stop, C_ACCENT, 0);
+    lv_obj_set_style_bg_opa(mp_stop, LV_OPA_COVER, 0);
+    for (int k = 0; k < RTC_BUSES_MAX; k++) {             // the buses: green dots
+        mp_bus[k] = dot(scr_map, 18);
+        lv_obj_set_style_bg_color(mp_bus[k], C_LIVE, 0);
+        lv_obj_set_style_border_width(mp_bus[k], 3, 0);
+    }
 }
 
 /* ---------- message screen (start-up) ---------- */
@@ -920,6 +1153,10 @@ static void show_alerts(void)
 }
 _Static_assert(FAVS_MAX == 8, "one STOP_N per favourite page");
 
+static lv_obj_t *get_map(void) { return scr_map; }
+static bool shown_map(void) { return lv_screen_active() == scr_map; }
+static void show_map(void) { su_leave(); map_open(fav_shown() >= 0 ? fav_shown() : 0); }   // the stop shown, else the first
+
 static const screen_def_t screens[] = {
     { "stop",    get_stop,   show_stop,   stops_refresh,  shown_stop },
     { "system",  get_system, show_system, system_refresh, shown_system },
@@ -927,6 +1164,7 @@ static const screen_def_t screens[] = {
     { "setup1",  get_setup1, show_setup1, prep_setup,     shown_setup1 },
     STOP_DEF(2), STOP_DEF(3), STOP_DEF(4), STOP_DEF(5), STOP_DEF(6), STOP_DEF(7), STOP_DEF(8),
     { "alerts",  get_alerts, show_alerts, stops_refresh,  shown_alerts },
+    { "map",     get_map,    show_map,    map_refresh,    shown_map },
     { "message", get_msg,    NULL,        NULL,           shown_msg },
 };
 
@@ -940,11 +1178,14 @@ void ui_init(void)
     f_big = mkfont(64);
     f_mid = mkfont(30);
     f_small = mkfont(20);
+    f_tiny = mkfont(14);
     main_create();
+    map_create();
     msg_create();
     setup_create();
     screens_register(screens, sizeof(screens) / sizeof(screens[0]));
     lv_screen_load(scr_msg);
     display_unlock();
     web_set_snapshot(screens_snapshot, screens_snapshot_free);
+    map_init(map_updated);
 }

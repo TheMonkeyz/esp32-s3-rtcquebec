@@ -68,6 +68,7 @@ def quick_swipes(ctx):
     # Where the second one ends is timing: it starts when the first's release animation ends, by then the simulated
     # finger has mostly moved on ("samples 1", "back" once on v0.1.1-rc.1, on to the other page in the run before)
     second = 'back' if ' back |' in drags[1] else 'on'
+    check(not ctx.log.count(r'ui: map of favourite', start=at), 'a quick swipe opened the map (read as a tap)')
     ctx.note(f'two swipes 150 ms apart: 2 drags, the second went {second}; now on {b.screen()}')
     go_home(ctx)
 
@@ -86,6 +87,35 @@ def long_press_opens_setup(ctx):
     b.tap()
     b.wait_screen(HOME, 6)
     ctx.note(f'long-press at {SCREEN_C}: setup; tap: back to {HOME}')
+
+
+@test('navigation')
+def tap_opens_map(ctx):
+    """A tap on a stop page opens its map: the street map's tiles arrive, the route's buses are asked for every 20 s
+    while it is open and not after; a tap closes it (user's request, 2026-10-07)."""
+    b = ctx.board
+    if not ctx.board.api('/api/favs').get('favs'):
+        ctx.note('no favourite stop on this board: not checked')
+        return
+    b.show(NEXT)
+    b.wait_screen(NEXT, 6)
+    time.sleep(1)
+    at = len(ctx.log.lines())
+    b.tap()
+    b.wait_screen('map', 6)
+    # The tiles: downloaded at the first opening of this run (the screens suite's, or this one), then kept
+    if not ctx.log.count(r'map: zoom \d+ at', start=0):
+        ctx.log.wait(r'map: zoom \d+ at', 30, 'the map tiles', start=at)
+    tiles = re.findall(r'map: zoom \d+ at \S+: (\d+)/(\d+) tiles', '\n'.join(ctx.log.lines()))
+    check(tiles and tiles[-1][0] == tiles[-1][1], f'map tiles: {tiles[-1] if tiles else "none"}')
+    ctx.log.wait(r'deps: GET /ListeAutobus_Parcours', 30, 'the buses asked for', start=at)
+    b.tap()
+    b.wait_screen(NEXT, 6)
+    closed = len(ctx.log.lines())
+    time.sleep(25)
+    n = ctx.log.count(r'deps: GET /ListeAutobus_Parcours', start=closed)
+    check(n == 0, f'{n} bus position request(s) after the map closed')
+    ctx.note('tap: map with tiles and buses; tap: back to the stop; no positions asked once closed')
 
 
 @test('navigation')

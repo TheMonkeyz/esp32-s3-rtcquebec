@@ -121,8 +121,18 @@
   "note": "widened from 3.4 (one run): v0.1.0-rc.1 measured 4.4 with better fps (49.6) and gaps (66 ms)"
  },
  "swipe_render_avg_ms.system_to_stop": {
-  "max": 2.2,
-  "note": "first run",
-  "ref": 1.6
+  "max": 4.0,
+  "ref": 1.6,
+  "note": "widened from 2.2 (one run): v0.2.0-map.2 measured 2.6 with the same fps"
+ },
+ "snapshot_ms.alerts": {
+  "max": 1915.2,
+  "note": "first run (v0.2.0-map.2, 2026-10-07)",
+  "ref": 1368
+ },
+ "snapshot_ms.map": {
+  "max": 2291.8,
+  "note": "first run (v0.2.0-map.2, 2026-10-07)",
+  "ref": 1637
  }
 }

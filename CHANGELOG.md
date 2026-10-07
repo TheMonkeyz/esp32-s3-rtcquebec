@@ -10,6 +10,7 @@ How to write an entry: add a `## vX.Y.Z - YYYY-MM-DD` section at the top **befor
 
 ## v0.2.0-rc.1 - 2026-10-07
 - Service alerts: swipe past your last stop for the RTC's current notices about your routes (works, detours, stops not served), with when they end. A stop page says when an alert applies to it.
+- The buses on a map: tap a stop page to see its route's buses coming your way on a street map around the stop, updated every 20 seconds. Tap anywhere to go back.
 
 ## v0.1.1 - 2026-10-07
 - Adding a stop: a route number that isn't in use (like 999) now says the route doesn't exist, instead of "The RTC didn't answer".

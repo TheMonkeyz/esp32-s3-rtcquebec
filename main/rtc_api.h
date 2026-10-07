@@ -31,11 +31,23 @@ typedef struct {
     char direction[48];                   // "Colline Parlementaire"
     char stop_name[48];                   // "St-Dominique"
     char stop_desc[64];                   // "Charest Est / Saint-Dominique"
+    double lat, lon;                      // the stop (0, 0: not in the reply)
     bool not_served;                      // "arretNonDesservi": the stop isn't served now (a detour, works)
     bool drop_off_only;                   // "descenteSeulement"
     int n;                                // departures in dep[] (0: none left today)
     rtc_dep_t dep[RTC_DEPS_MAX];
 } rtc_board_t;
+
+// ListeAutobus_Parcours: the buses on a route in one direction, where they are (rtcquebec.ca's route map uses it as
+// "getBusPositions"; RTC caches it 20 s)
+#define RTC_BUSES_MAX 12
+typedef struct {
+    char id[12];                          // "1269" (the bus)
+    double lat, lon;
+    char updated[24];                     // "2026-10-07T01:02:58", local time, no offset (as RTC sends it)
+} rtc_bus_t;
+bool rtc_buses_url(char *out, size_t n, const char *route, const char *dir);
+int rtc_parse_buses(const char *json, rtc_bus_t *out, int max);   // how many, -1 if it isn't that reply
 
 // Parcours_Periode: a route and its two directions
 typedef struct {

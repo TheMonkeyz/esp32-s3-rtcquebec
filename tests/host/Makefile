@@ -11,7 +11,7 @@ OUT := build
 CFLAGS := -std=gnu11 -D_DEFAULT_SOURCE -g -O1 -Wall -Wno-unused-function -fsanitize=address,undefined \
           -fno-sanitize-recover=undefined -Ishim -I$(FORGE)/include -I$(MAIN) -include shim/host.h
 # test_testcon only once the firmware has the pure command table (testcon_registry.c)
-TESTS := utf8 version png i18n textfit rtc_api $(if $(wildcard $(FORGE)/testcon_registry.c),testcon)
+TESTS := utf8 version png i18n textfit rtc_api geo $(if $(wildcard $(FORGE)/testcon_registry.c),testcon)
 
 all: $(TESTS:%=$(OUT)/test_%)
 	@set -e; for t in $(TESTS); do ./$(OUT)/test_$$t; done
@@ -28,6 +28,8 @@ $(OUT)/test_textfit: test_textfit.c $(FORGE)/textfit.c $(FORGE)/include/textfit.
 # rtc_api.c parses RTC's replies with cJSON (ESP-IDF's copy); the replies are in data/
 $(OUT)/test_rtc_api: test_rtc_api.c $(MAIN)/rtc_api.c $(MAIN)/rtc_api.h | $(OUT)
 	$(CC) $(CFLAGS) -I$(CJSON) -o $@ test_rtc_api.c $(MAIN)/rtc_api.c $(CJSON)/cJSON.c
+$(OUT)/test_geo: test_geo.c $(MAIN)/geo.c $(MAIN)/geo.h | $(OUT)
+	$(CC) $(CFLAGS) -o $@ test_geo.c $(MAIN)/geo.c -lm
 $(OUT)/test_testcon: test_testcon.c $(FORGE)/testcon_registry.c $(FORGE)/include/testcon.h | $(OUT)
 	$(CC) $(CFLAGS) -o $@ test_testcon.c $(FORGE)/testcon_registry.c
 
