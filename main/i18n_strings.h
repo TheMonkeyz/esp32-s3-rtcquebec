@@ -7,7 +7,7 @@
 
 // Screens
 X(T_HELLO,          "Hello",                       "Bonjour")
-X(T_HELLO_SUB,      "espforge starter",            "Application de départ espforge")
+X(T_HELLO_SUB,      "RTC Québec",                  "RTC Québec")
 X(T_SWIPE_HINT,     "Swipe left: system\nLong-press: Wi-Fi setup",
                     "Glissez à gauche : système\nAppuyez longuement : Wi-Fi")
 X(T_SYSTEM,         "System",                      "Système")

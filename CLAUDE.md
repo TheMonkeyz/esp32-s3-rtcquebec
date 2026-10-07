@@ -39,20 +39,18 @@ Details: `docs/WORKFLOW.md`, `docs/RELEASING.md`. Skills in `.claude/skills/` ho
 Lessons by topic (memory, LVGL, touch, Wi-Fi, OTA, Windows tooling…): `docs/LESSONS.md`. Add a lesson there when a
 bug teaches something general; add the project-specific fact below.
 
-## Shared with weather_amoled
+## Built on espforge
 
-[weather_amoled](https://github.com/TheMonkeyz/esp32-s3-weather) (`C:\Users\lmathieu\ESPDEV\weather_amoled`) is the
-app espforge was extracted from (October 4). Since its v1.14.0 it **uses forge_core, forge_net, forge_ota and
-dns_server at an espforge release tag** (its `main/idf_component.yml`); it keeps its own display, touch, slide.c and
-app code (forge_lvgl and the board are not used there).
+This project was created from the [espforge](https://github.com/TheMonkeyz/espforge) template (v0.2.1, 2026-10-06;
+local checkout `C:\Users\lmathieu\ESPDEV\espforge`). The framework components (`components/forge_*`,
+`dns_server`, `boards/`) and tools are copies: a framework bug fixed here gets ported to espforge (or a task for
+it), and espforge fixes get pulled in by hand. Keep app code in `main/`.
 
-- **Before tagging an espforge release that changes those components**, build weather_amoled against this checkout
-  (`python tools/forge_local.py` there: a temporary `override_path`, nothing committed) and run its harness; then tag
-  here, and bump the four tags in its manifest. Keep components generic: app texts, names and languages come in
-  through the hooks (i18n descriptors, `svc_set_why_text`, `ota_set_err_text`, Kconfig `FORGE_*`).
-- **Still twins** (same code in both, not shared): forge_lvgl's `lvgl_mem.c` and `pager.c`, the board's `display.c`,
-  `touch.c`, `imu.c`, the harness's `board.py` / `harness.py` and the flash helper. A fix in one gets ported, or a
-  task for the other. Its `slide.c` is the larger original: port ideas, not the file.
+## The app
+
+An RTC Nomade-like display for Québec City buses: favourite stops' next departures (real time), alerts, live map.
+Data: RTC's website API called directly (undocumented, personal use, decided 2026-10-06): see
+docs/ARCHITECTURE.md "Data sources" for its endpoints and polling rules. Never poll faster than those rules allow.
 
 ## Working setup (this PC)
 
@@ -66,7 +64,10 @@ app code (forge_lvgl and the board are not used there).
   (Node in `C:\Program Files\nodejs`).
 - **Two ways to work:**
   1. **Claude Code on the PC** (preferred): builds, `idf.py`, the harness and `gh` run directly. The flash helper
-     still owns the COM port while it is logging; the harness talks to it.
+     still owns the COM port while it is logging; the harness talks to it. **Claude starts the helper itself, in the
+     background** (`run_in_background`: `powershell -NoProfile -ExecutionPolicy Bypass -File tools\devloop\flash_helper.ps1`), so no window
+     opens on the user's screen (user's rule, 2026-10-06, as weather_amoled does); restart it the same way after
+     editing `flash_helper.ps1` (L6). `start_flash_helper.bat` (a window) only when the user asks for one.
   2. **Claude desktop app / cloud**: builds run in a cloud container, the shell has **no USB** and can't type into
      Windows terminals. The user starts `tools\devloop\start_flash_helper.bat` once; Claude stages the parts, runs
      `python tools/devloop/devloop.py flash 120` (or writes `.devloop/flash.request`), waits for

@@ -20,7 +20,7 @@ const STATES = ['idle', 'checking', 'up_to_date', 'available', 'downloading', 'd
 
 function fresh() {
   return {
-    info: { app: 'espforge', version: 'v0.1.0-test', ip: '127.0.0.1', ssid: 'HomeNet', rssi: -52, uptime_s: 300,
+    info: { app: 'rtc_quebec', version: 'v0.1.0-test', ip: '127.0.0.1', ssid: 'HomeNet', rssi: -52, uptime_s: 300,
             setup: false, lang: 'en', languages: [{ code: 'en', name: 'English' }, { code: 'fr', name: 'Français' }] },
     update: { current: 'v0.1.0-test', latest: '', channel: 'stable', state: 'idle', progress: 0, error: '',
               pending_verify: false, uptime_s: 300, notes: '', rolled_back: false },

@@ -1,24 +1,19 @@
-# espforge
+# RTC Québec display
 
-espforge is a starting point for ESP32 firmware (ESP-IDF v5.5.4) developed mostly by an AI agent, Claude Code, with
-a person deciding and trying things. It is the framework and the working method extracted from
-[esp32-s3-weather](https://github.com/TheMonkeyz/esp32-s3-weather), a weather display built that way in six days
-(~30 releases). It gives you: firmware components for Wi-Fi setup (setup network, captive portal, Easy Connect), a
-settings web page over HTTPS with a per-device key, updates over Wi-Fi with rollback from a GitHub Pages site,
-diagnostics and a USB test console; PC tools that let the agent flash, probe and test the board without a person
-(a file-based flash helper, a test harness with a performance baseline, screenshots, host unit tests, browser tests
-of the settings page); CI that builds, tests and publishes releases; and the lessons that made those tools necessary
-([docs/LESSONS.md](docs/LESSONS.md)). The repository itself builds a small starter app for the Waveshare
-ESP32-S3-Touch-AMOLED-1.75.
+A small round display that shows when the next RTC buses leave your stops in Québec City, like the RTC Nomade app:
+real-time next departures at your favourite stops, service alerts for your routes and a live bus map. It runs on the
+Waveshare ESP32-S3-Touch-AMOLED-1.75 and is built on [espforge](https://github.com/TheMonkeyz/espforge) (Wi-Fi
+setup from a phone, a settings page, updates over Wi-Fi). Work in progress.
+
+Not affiliated with the Réseau de transport de la Capitale (RTC). Departure times come from RTC's public website;
+schedules use public information from the RTC (https://www.rtcquebec.ca/en/open-data).
 
 ## Try it on the board
 
-**[Install from the web flasher](https://themonkeyz.github.io/espforge/)**: plug the Waveshare
-ESP32-S3-Touch-AMOLED-1.75 into a computer by USB, open the page in Chrome or Edge (desktop; they can talk to USB
-devices), pick **Stable** or **Beta** (release candidates) and press Install. Then set up Wi-Fi from your phone with
-the display's setup network or Easy Connect (press and hold the screen). Later versions arrive over Wi-Fi: the display
-offers them on its system screen and on its settings page. Release notes: [CHANGELOG.md](CHANGELOG.md); all builds:
-[Releases](https://github.com/TheMonkeyz/espforge/releases).
+**[Install from the web flasher](https://themonkeyz.github.io/esp32-s3-rtcquebec/)** (once the first release is
+out): plug the board into a computer by USB, open the page in Chrome or Edge (desktop), pick **Stable** or **Beta**
+and press Install. Then set up Wi-Fi from your phone with the display's setup network (`RTC-Setup`) or Easy Connect
+(press and hold the screen), and pick your stops on the settings page. Release notes: [CHANGELOG.md](CHANGELOG.md).
 
 ## The loop
 
@@ -58,7 +53,7 @@ idf.py -B build\v55 -D SDKCONFIG=build\v55\sdkconfig build
 Flash through the helper (it owns the COM port and keeps a log window open while the agent acts):
 
 ```powershell
-tools\devloop\start_flash_helper.bat            # once, in its own window
+tools\devloop\start_flash_helper.bat            # once, in its own window (Claude Code runs flash_helper.ps1 in the background instead)
 python tools\devloop\stage.py                   # copy the parts under unique names, check md5
 python tools\devloop\devloop.py flash 120       # flash, then log 120 s to .devloop\serial_log.txt
 ```
@@ -69,7 +64,7 @@ Test everything:
 python tools\harness\harness.py                 # all suites; report in tools\harness\reports\<date>\
 ```
 
-On first boot the display opens its setup network (`Forge-Setup`); join it with a phone, or scan the Easy Connect
+On first boot the display opens its setup network (`RTC-Setup`); join it with a phone, or scan the Easy Connect
 code, and give it your Wi-Fi. The settings page is then at `https://<ip>/` (the address is in the log line
 `web: Settings page: https://<ip>/`).
 
@@ -131,5 +126,6 @@ updates (channel, check, install, release notes). Everything visible goes throug
 
 ## Credits and licence
 
-Extracted from [esp32-s3-weather](https://github.com/TheMonkeyz/esp32-s3-weather) (TheMonkeyz). MIT licence, see
+Built on [espforge](https://github.com/TheMonkeyz/espforge), itself extracted from
+[esp32-s3-weather](https://github.com/TheMonkeyz/esp32-s3-weather) (TheMonkeyz). MIT licence, see
 [LICENSE](LICENSE); third-party parts in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

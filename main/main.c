@@ -131,7 +131,7 @@ void app_main(void)
     ota_start(ui_ota);          // logs "ota: Running ..."; checks once Wi-Fi is up; confirms a new image after 60 s
     ui_init();
     testcon_start();            // ready before Wi-Fi, so start-up itself can be tested
-    ui_message("espforge", tr(T_STARTING));
+    ui_message("RTC Québec", tr(T_STARTING));
 
     if (boot_button_held()) net_clear_creds();
     char ssid[NET_SSID_MAX + 1] = {0}, pass[NET_PASS_MAX + 1] = {0};
