@@ -8,6 +8,11 @@ How to write an entry: add a `## vX.Y.Z - YYYY-MM-DD` section at the top **befor
 `- ` line per change, written for the person holding the display. Release candidates get their own
 `## vX.Y.Z-rc.N - YYYY-MM-DD` section, shown only to Beta users; the final release's section lists everything again.
 
+## v0.1.0 - 2026-10-07
+- Next departures at your favourite stops, one page each: the next bus in minutes, real time or scheduled, and the three after it. Swipe right for the system page.
+- Add, order and remove your stops on the settings page: stop number, route, then pick the direction. It works from the display's setup network too.
+- Wi-Fi setup from a phone (the display's setup network or Easy Connect), a settings page, and updates over Wi-Fi from the Stable or Beta channel.
+
 ## v0.1.0-rc.1 - 2026-10-06
 - Next departures at your favourite stops, one page each: the next bus in minutes, real time or scheduled, and the three after it. Swipe right for the system page.
 - Add, order and remove your stops on the settings page: stop number, route, then pick the direction.
