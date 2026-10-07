@@ -58,3 +58,7 @@ void touch_forget(void);                       // the touch LVGL last saw was ha
 // Called with each touch read LVGL makes, before LVGL handles it (gesture recognisers, waking a dark screen)
 typedef void (*touch_read_hook_t)(lv_indev_t *indev, lv_indev_data_t *data);
 void touch_set_read_hook(touch_read_hook_t hook);
+// Asked when a finger comes down, before LVGL and the read hook see it: true = ignore this whole press until the
+// finger lifts (LVGL and the read hook see no finger). The app's "a touch on a dark screen only wakes it".
+typedef bool (*touch_press_filter_t)(void);
+void touch_set_press_filter(touch_press_filter_t filter);

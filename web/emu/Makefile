@@ -20,13 +20,15 @@ OUT := build
 MINIZ := $(OUT)/miniz
 VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
 
-# The firmware, unchanged: main.c runs as a task (emu_main.c), its routes serve the settings page (emu_web.c)
-FIRMWARE := main.c ui.c app_text.c rtc_api.c favs.c departures.c map.c geo.c
+# The firmware, unchanged: main.c runs as a task (emu_main.c), its routes serve the settings page (emu_web.c).
+# presence.c (microphones, motion sensor) is not: emu_presence.c stands in for it (the screen stays on, "No microphone")
+FIRMWARE := main.c ui.c app_text.c rtc_api.c favs.c departures.c map.c geo.c presence_sm.c
 FORGE_CORE := i18n.c i18n_nvs.c textfit.c testcon_registry.c png_rows.c
 FORGE_LVGL := forge_lvgl.c pager.c slide.c screens.c
 FORGE_NET := svc.c
 FORGE_OTA := ota_web.c
-EMU := emu_main.c emu_display.c emu_touch.c emu_http.c emu_nvs.c emu_stubs.c emu_tasks.c emu_web.c emu_time.c
+EMU := emu_main.c emu_display.c emu_touch.c emu_http.c emu_nvs.c emu_stubs.c emu_tasks.c emu_web.c emu_time.c \
+       emu_presence.c
 LV_SRC := $(shell find $(LVGL)/src -name '*.c')
 
 CFLAGS := -O2 -DEMU_BUILD '-DEMU_VERSION="$(VERSION)"' -I. -Ishim -I$(MAIN) -I$(COMP)/forge_core/include \

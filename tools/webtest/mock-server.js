@@ -9,6 +9,7 @@
 //                              bug once hid the Install button and nothing tested the "available" state)
 //   POST /__key {key}          the display's key (null: no key needed)
 //   POST /__setup              the page is on the setup network (no key needed, setup: true)
+//   POST /__presence {...}     the screen dimming state (presence.c): {state, mic_ok, imu_ok, level_db, ...}
 //   RTC in the mock: routes 800 (directions 0 / 1) and 11; route 800 direction 0 stops at 1025 and 1005, direction 1
 //   at 1026; any other stop or route is "not served" (404). Route "999" makes the RTC unreachable.
 const http = require('http');
@@ -47,6 +48,12 @@ function fresh() {
     key: KEY,                                 // POSTs and snapshots need X-Key (null: none)
     log: [],                                  // every API call: {method, url, body} or {..., refused}
     favs: [],                                 // the favourite stops, as POST /api/favs saved them
+    presence: {                               // GET /api/presence (main.c's shape; presence.c's defaults)
+      ok: true, enabled: true, margin_db: 10, wake_s: 3, dim_s: 600, off_s: 3000, bright_pct: 100, dim_pct: 15,
+      baseline_db: -60, level_db: -72, threshold_db: -50, state: 'active', wake_progress: 0, quiet_s: 12,
+      calibrating: false, calib_left_s: 0, mic_ok: true, brightness: 100, imu_ok: true, motion_g: 0.01,
+      motion_wake: true, motion_thr: 0.1,
+    },
   };
 }
 let st = fresh();
@@ -112,6 +119,31 @@ const routes = {
     return [200, { ok: true }];
   },
   'GET /api/snapshot': () => [404, { error: 'no snapshots in the mock' }],
+  'GET /api/presence': () => {
+    const p = st.presence;
+    if (p.calibrating && --p.calib_left_s <= 0) { p.calibrating = false; p.calib_left_s = 0; }   // 1 s a poll
+    return [200, { ...p }];
+  },
+  'POST /api/presence': b => {                    // as presence_set_config(): clamped, baseline kept
+    if (!b) return [400, { error: 'json' }];
+    const p = st.presence;
+    const num = (k, lo, hi) => { if (typeof b[k] === 'number') p[k] = Math.min(hi, Math.max(lo, b[k])); };
+    if (typeof b.enabled === 'boolean') p.enabled = b.enabled;
+    if (typeof b.motion_wake === 'boolean') p.motion_wake = b.motion_wake;
+    num('margin_db', 1, 60); num('wake_s', 0.2, 60); num('dim_s', 1, 86400); num('off_s', 1, 86400);
+    num('bright_pct', 5, 100); num('dim_pct', 1, 100); num('motion_thr', 0.02, 0.5);
+    p.threshold_db = p.baseline_db + p.margin_db;
+    p.state = 'active'; p.brightness = p.bright_pct;
+    return [200, { ...p, ok: true }];
+  },
+  'POST /api/calibrate': b => {
+    const p = st.presence;
+    if (!p.mic_ok) return [200, { ok: false, why: 'no_mic' }];
+    if (p.calibrating) return [200, { ok: false, why: 'busy' }];
+    p.calibrating = true;
+    p.calib_left_s = (b && b.seconds) || 5;
+    return [200, { ...p, ok: true }];
+  },
   'GET /api/favs': () => [200, { max: 8, favs: st.favs.map(f => ({ ...f, ...(STOPS[f.stop + '/' + f.route + '/' + f.dir] || {}) })) }],
   'POST /api/route': b => {
     if (b && b.route === '999') return [200, { ok: false, why: 'rtc' }];
@@ -144,6 +176,10 @@ http.createServer(async (req, res) => {
     const b = parse(await readBody(req)) || {};
     st.key = b.key || null;
     return json(res, 200, { ok: true });
+  }
+  if (route === 'POST /__presence') {
+    Object.assign(st.presence, parse(await readBody(req)) || {});
+    return json(res, 200, st.presence);
   }
   if (route === 'POST /__update') {
     const b = parse(await readBody(req)) || {};

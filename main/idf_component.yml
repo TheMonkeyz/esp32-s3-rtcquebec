@@ -1,2 +1,3 @@
 dependencies:
   lvgl/lvgl: "9.2.2"   # pinned: LVGL versions differ in internals the framework relies on (docs/LESSONS.md)
+  espressif/esp_codec_dev: "1.5.11"   # the microphones (presence.c); pinned as in weather_amoled ("~1.5.2" floated)
