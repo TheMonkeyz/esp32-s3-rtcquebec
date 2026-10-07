@@ -100,6 +100,15 @@ bool rtc_parse_board(const char *json, rtc_board_t *out)
     return ok;
 }
 
+bool rtc_reply_none(const char *json)
+{
+    if (!json) return false;
+    while (isspace((unsigned char)*json)) json++;
+    if (strncmp(json, "null", 4)) return false;
+    for (json += 4; *json; json++) if (!isspace((unsigned char)*json)) return false;
+    return true;
+}
+
 bool rtc_parse_route(const char *json, rtc_route_t *out)
 {
     memset(out, 0, sizeof(*out));

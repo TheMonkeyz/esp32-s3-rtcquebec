@@ -77,7 +77,10 @@ static int get(const char *url, char *buf, int cap, bool (*parse)(const char *, 
     int64_t t0 = esp_timer_get_time();
     int status;
     esp_err_t err = http_once(&cfg, &status);
-    if (err == ESP_OK && status == 200) {
+    if (err == ESP_OK && status == 200 && rtc_reply_none(buf)) {
+        svc_ok(svc_rtc, t0);                                  // "null": nothing by that number, as a 404
+        status = 404;
+    } else if (err == ESP_OK && status == 200) {
         if (parse(buf, out)) svc_ok(svc_rtc, t0);
         else { svc_fail_why(svc_rtc, SVC_WHY_BAD_REPLY, t0); status = -1; }
     } else if (err == ESP_OK && status == 404) {

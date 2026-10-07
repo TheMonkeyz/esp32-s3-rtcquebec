@@ -50,6 +50,10 @@ bool rtc_route_url(char *out, size_t n, const char *route, const char *date);
 bool rtc_parse_board(const char *json, rtc_board_t *out);
 bool rtc_parse_route(const char *json, rtc_route_t *out);
 
+// A 200 reply that says "nothing here": RTC answers `null` for a route number not in use (999), where an unknown
+// one (4242) gets a 404. Callers treat it as "not found", not as a bad reply.
+bool rtc_reply_none(const char *json);
+
 // "2026-10-06T22:46:57-04:00" -> UTC seconds; false if it isn't that shape
 bool rtc_parse_time(const char *iso, time_t *out);
 

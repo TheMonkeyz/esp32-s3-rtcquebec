@@ -60,6 +60,10 @@ int main(void)
     CHECK(!strcmp(r.dir_code[1], "1") && !strcmp(r.dir_name[1], "Terminus Chute-Montmorency"), "%s", r.dir_name[1]);
     free(s);
     CHECK(!rtc_parse_route("{\"noParcours\":\"9999\"}", &r) && !r.route[0], "unknown route");
+    // Route 999 (2026-10-07): HTTP 200 with the body "null"; the device said "the RTC didn't answer"
+    CHECK(rtc_reply_none("null") && rtc_reply_none(" null\r\n"), "null is none");
+    CHECK(!rtc_reply_none("{}") && !rtc_reply_none("nullx") && !rtc_reply_none("") && !rtc_reply_none(NULL), "not none");
+    CHECK(!rtc_parse_route("null", &r), "null isn't a route");
 
     char url[200];
     rtc_fav_t f = { "1025", "800", "0" };
