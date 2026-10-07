@@ -18,9 +18,15 @@ APP_WATCH = [
 ]
 METRIC_SUITES = [('swipe_', 'perf'), ('setup_page_', 'navigation'), ('easy_connect_', 'navigation')]
 
-# The pager: system | stop | further stops. The navigation tests expect at most one favourite stop on the test board
-# (the right end bounces on "stop"); with none, "stop" says how to add some.
+# The pager: system | stop | stop2 .. stop8, one page per favourite (at least "stop": without favourites it says how to
+# add some). The tests read the display's favourites and swipe through all of them.
 HOME, NEXT = 'system', 'stop'
+
+
+def pages(ctx):
+    """The pager's pages, left to right, for the favourites the display has now."""
+    n = len(ctx.board.api('/api/favs').get('favs', []))
+    return [HOME, NEXT] + [f'stop{i}' for i in range(2, n + 1)]
 
 
 def go_home(ctx):
@@ -33,16 +39,17 @@ def go_home(ctx):
 
 @test('navigation')
 def swipe_between_pages(ctx):
-    """Swipe like a person: left to the next page, right back; no wrap-around at either end."""
+    """Swipe like a person: left through every page, right back; no wrap-around at either end."""
     b = ctx.board
     go_home(ctx)
-    route = [('swipe left', NEXT), ('swipe left', NEXT),      # the right end: bounces back
-             ('swipe right', HOME), ('swipe right', HOME)]    # the left end: bounces back
+    p = pages(ctx)
+    route = ([('swipe left', x) for x in p[1:]] + [('swipe left', p[-1])] +     # the right end: bounces back
+             [('swipe right', x) for x in p[-2::-1]] + [('swipe right', HOME)])  # the left end: bounces back
     for cmd, want in route:
         b.cmd(cmd)
         time.sleep(0.8)
         b.wait_screen(want, 6)
-    ctx.note(f'{HOME} <-> {NEXT} by swipes, both ends bounce')
+    ctx.note(f'{" <-> ".join(p)} by swipes, both ends bounce')
 
 
 @test('navigation')

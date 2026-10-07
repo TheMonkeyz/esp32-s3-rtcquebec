@@ -1,1 +1,128 @@
-{}
+{
+ "_comment": "Limits for tools/harness/harness.py (compare()): 'max' = higher is worse, 'min' = lower is worse; 'ref' = measured on the board. First baseline: one full run of v0.1.0-deps.5 on the Waveshare AMOLED 1.75 with 3 favourite stops, 2026-10-06 (limits proposed by --update-baseline, not yet checked over several runs: widen one that trips without a real change). stop_to_system is slower than system_to_stop (40 vs 61 fps, a 195 ms LVGL redraw after the move): an open thread in docs/HISTORY.md. After a deliberate change: --update-baseline, review, copy.",
+ "boot_s.ready": {
+  "max": 7.1,
+  "note": "first run",
+  "ref": 5.1
+ },
+ "easy_connect_qr_s": {
+  "max": 3.7,
+  "note": "first run",
+  "ref": 2.65
+ },
+ "failed_allocs": {
+  "max": 0.0,
+  "note": "first run",
+  "ref": 0
+ },
+ "idle_internal_drop_kb": {
+  "max": 0.0,
+  "note": "first run",
+  "ref": 0
+ },
+ "internal_free_kb": {
+  "min": 89.2,
+  "note": "first run",
+  "ref": 119
+ },
+ "internal_largest_kb": {
+  "min": 33.0,
+  "note": "first run",
+  "ref": 44
+ },
+ "internal_min_kb": {
+  "min": 80.2,
+  "note": "first run",
+  "ref": 107
+ },
+ "lvgl_internal_fallbacks": {
+  "max": 0.0,
+  "note": "first run",
+  "ref": 0
+ },
+ "page_kb": {
+  "max": 22.4,
+  "note": "first run",
+  "ref": 16
+ },
+ "psram_min_kb": {
+  "min": 4736.2,
+  "note": "first run",
+  "ref": 6315
+ },
+ "reconnect_s": {
+  "max": 4.3,
+  "note": "first run",
+  "ref": 3.1
+ },
+ "setup_page_fps": {
+  "min": 50.2,
+  "note": "first run",
+  "ref": 67
+ },
+ "snapshot_ms.setup": {
+  "max": 1857.8,
+  "note": "first run",
+  "ref": 1327
+ },
+ "snapshot_ms.setup1": {
+  "max": 2160.2,
+  "note": "first run",
+  "ref": 1543
+ },
+ "snapshot_ms.stop": {
+  "max": 2578.8,
+  "note": "first run",
+  "ref": 1842
+ },
+ "snapshot_ms.system": {
+  "max": 1951.6,
+  "note": "first run",
+  "ref": 1394
+ },
+ "swipe_fps.drag_slow": {
+  "min": 47.0,
+  "note": "first run",
+  "ref": 62.6
+ },
+ "swipe_fps.stop_to_system": {
+  "min": 30.4,
+  "note": "first run",
+  "ref": 40.5
+ },
+ "swipe_fps.system_to_stop": {
+  "min": 45.5,
+  "note": "first run",
+  "ref": 60.6
+ },
+ "swipe_gap_max_ms.drag_slow": {
+  "max": 85.4,
+  "note": "first run",
+  "ref": 61
+ },
+ "swipe_gap_max_ms.stop_to_system": {
+  "max": 273.0,
+  "note": "first run",
+  "ref": 195
+ },
+ "swipe_gap_max_ms.system_to_stop": {
+  "max": 79.8,
+  "note": "first run",
+  "ref": 57
+ },
+ "swipe_render_avg_ms.drag_slow": {
+  "max": 1.1,
+  "note": "first run",
+  "ref": 0.8
+ },
+ "swipe_render_avg_ms.stop_to_system": {
+  "max": 3.4,
+  "note": "first run",
+  "ref": 2.4
+ },
+ "swipe_render_avg_ms.system_to_stop": {
+  "max": 2.2,
+  "note": "first run",
+  "ref": 1.6
+ }
+}

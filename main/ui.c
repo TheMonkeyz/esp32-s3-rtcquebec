@@ -737,11 +737,30 @@ static void prep_setup(void)                         // texts only: no access po
     su_texts();
 }
 
+// The other stops' pages: "stop2".."stop8" (page 1 + N - 1), for the harness's swipes and snapshots. A page not in use
+// (fewer favourites) is never shown and can't be shown.
+#define STOP_N(n) \
+    static lv_obj_t *get_stop##n(void) { return page_of(n - 1); } \
+    static bool shown_stop##n(void) { return lv_screen_active() == scr_main && pager_current(pager) == n; } \
+    static void show_stop##n(void) \
+    { \
+        if (n_favs < n) return; \
+        su_leave(); \
+        stops_refresh(); \
+        pager_go(pager, n, false); \
+        lv_screen_load(scr_main); \
+        deps_show(fav_shown()); \
+    }
+STOP_N(2) STOP_N(3) STOP_N(4) STOP_N(5) STOP_N(6) STOP_N(7) STOP_N(8)
+#define STOP_DEF(n) { "stop" #n, get_stop##n, show_stop##n, stops_refresh, shown_stop##n }
+_Static_assert(FAVS_MAX == 8, "one STOP_N per favourite page");
+
 static const screen_def_t screens[] = {
     { "stop",    get_stop,   show_stop,   stops_refresh,  shown_stop },
     { "system",  get_system, show_system, system_refresh, shown_system },
     { "setup",   get_setup,  show_setup,  prep_setup,     shown_setup },
     { "setup1",  get_setup1, show_setup1, prep_setup,     shown_setup1 },
+    STOP_DEF(2), STOP_DEF(3), STOP_DEF(4), STOP_DEF(5), STOP_DEF(6), STOP_DEF(7), STOP_DEF(8),
     { "message", get_msg,    NULL,        NULL,           shown_msg },
 };
 

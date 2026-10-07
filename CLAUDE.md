@@ -107,3 +107,8 @@ rediscover.
 - **Adding favourites without the page**: `Board.api('/api/favs', {'favs': [...]})` from tools/harness (it knows the
   key); then `snapshot.py stop`.
 - **forge_lvgl `pager_set_count()`** was added here (2026-10-06): port it to espforge.
+- **Playwright's browser** on a fresh clone: `cd tools/webtest && npm ci && npx playwright install chromium`, and
+  check `%LOCALAPPDATA%\ms-playwright` holds `chromium_headless_shell-<n>`: without it the harness's webtest step
+  fails every test in ~1 ms ("Executable doesn't exist").
+- **Screen names**: `stop` is the first favourite, `stop2`..`stop8` the others (registered only for pages in use);
+  the harness's navigation test reads `/api/favs` and swipes through all of them.

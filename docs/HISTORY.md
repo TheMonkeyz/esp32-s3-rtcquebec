@@ -40,3 +40,8 @@ checking. Each with what to do instead. -->
 ## Open threads
 
 <!-- What is unfinished or known to be weak, with the numbers that say how weak. -->
+
+- Swipe from a stop page to the system page: 40.5 fps with a 195 ms gap (an LVGL redraw right after the move),
+  against 60.6 fps / 57 ms the other way (harness, v0.1.0-deps.5, 2026-10-06).
+- Saving a new favourite asks RTC twice (the check, then the first fetch): the check's reply could be kept.
+- Service alerts and the live bus map: endpoints not found yet.
