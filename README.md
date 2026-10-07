@@ -91,6 +91,7 @@ tools/snapshot.py               a screen rendered off-display, saved as PNG
 tools/diag_summary.py           summary of the diag: lines in a log
 tools/make_flasher_site.py      release parts (dist) and the Pages flasher/OTA site (site)
 tools/webtest/                  Playwright tests of the settings page against a mock device
+web/emu/                        the display in the browser (WebAssembly): the site's "Try it in your browser"
 tests/host/                     C unit tests with gcc + AddressSanitizer (WSL / Linux)
 docs/                           workflow, testing, releasing, lessons, protocol, components, templates
 .claude/                        Claude Code permissions and skills

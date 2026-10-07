@@ -31,8 +31,13 @@ static const char *TAG = "ui";
 #define C_LIVE   lv_color_hex(0x5BD68A)       // a real-time departure
 #define C_BAD    lv_color_hex(0xFF6B6B)
 
+#ifdef EMU_BUILD                             // the browser emulator (web/emu): the font is an array, its end a pointer
+extern const uint8_t ttf_start[];
+extern const uint8_t *const ttf_end;
+#else
 extern const uint8_t ttf_start[] asm("_binary_montserrat_ttf_start");
 extern const uint8_t ttf_end[]   asm("_binary_montserrat_ttf_end");
+#endif
 
 static lv_font_t *f_big, *f_mid, *f_small;
 static lv_obj_t *scr_main, *pager, *scr_msg, *scr_setup;

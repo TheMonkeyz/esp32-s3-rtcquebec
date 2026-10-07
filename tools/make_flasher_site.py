@@ -15,8 +15,8 @@ Two steps, used by CI (.github/workflows/firmware.yml) and for local previews:
         (docs/PROTOCOL.md §5), notes.json, the release notes from CHANGELOG.md, which the display shows before
         installing an update (and the page shows for the selected version), and site.json ({app, repo} from
         forge.json) for the page's title and links. fonts/ gets main/montserrat.ttf and its license when the
-        project has them (optional). With --emu <dir>, try/ gets a browser build of the firmware (index.html,
-        emu.js, emu.wasm) and channels.json says so ("try"): the page links to it.
+        project has them (optional). With --emu <dir>, try/ gets a browser build of the firmware (web/emu: index.html,
+        emu.js, emu.wasm, settings.html, emu-settings.js) and channels.json says so ("try"): the page links to it.
 
 The images stay separate parts on purpose: a single merged image would also overwrite the NVS
 partition (Wi-Fi credentials, settings, the TLS certificate) with 0xFF on every update.
@@ -183,6 +183,9 @@ def cmd_site(a):
         os.makedirs(os.path.join(a.out, "try"), exist_ok=True)
         for name in ("index.html", "emu.js", "emu.wasm"):
             shutil.copy2(os.path.join(a.emu, name), os.path.join(a.out, "try", name))
+        for name in ("settings.html", "emu-settings.js"):        # the settings page under it (web/emu)
+            if os.path.exists(os.path.join(a.emu, name)):
+                shutil.copy2(os.path.join(a.emu, name), os.path.join(a.out, "try", name))
         channels["try"] = "try/"
         print(f"  try/: the firmware in the browser ({os.path.getsize(os.path.join(a.emu, 'emu.wasm')) // 1024} KB)")
     with open(os.path.join(a.out, "channels.json"), "w") as f:

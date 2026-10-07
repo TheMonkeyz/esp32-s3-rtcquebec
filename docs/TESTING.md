@@ -232,6 +232,20 @@ Examples from weather_amoled: fake orange alerts appended after a real fetch at 
 once per alert" and quiet hours); `net_begin()` with a bogus SSID, the real one restored with `esp_wifi_set_config()`
 after N seconds (the offline setup path, before `wifi offline-boot` existed); fake lightning marks at fixed lat/lon.
 
+## 11. Try it in your browser (`web/emu/`)
+
+The firmware's own screens and departures code built to WebAssembly (LVGL + `main/` + forge components, the hardware
+replaced: `web/emu/README.md`). The flasher site publishes it as `try/` ("Try it in your browser"); locally it is a
+quick look at a screen change without a board, not a substitute for the device (no Wi-Fi setup, updates, timing).
+
+```bash
+wsl bash -lc 'source ~/emsdk/emsdk_env.sh && make -C /mnt/c/Users/lmathieu/ESPDEV/esp32-s3-rtcquebec/web/emu -j8'
+```
+
+Then serve `web/emu/build` (`.claude/launch.json` "emulator", port 8766) and open `http://localhost:8766/`. It fetches
+real departures from RTC with the firmware's polling rules: every load is two requests, then one every 30 s while a
+stop is shown. Don't leave it open or reload it in a loop.
+
 ## Project checks
 
 Each project lists here its screens, pseudo-screens, app suites and recipes (alert sounds, presence, sensors).
