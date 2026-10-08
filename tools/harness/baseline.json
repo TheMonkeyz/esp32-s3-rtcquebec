@@ -41,9 +41,9 @@
   "ref": 0
  },
  "page_kb": {
-  "max": 22.4,
-  "note": "first run",
-  "ref": 16
+  "max": 28,
+  "note": "v0.3.1-rc.0: 23 KB measured with the calibration result messages",
+  "ref": 23
  },
  "psram_min_kb": {
   "min": 4736.2,
