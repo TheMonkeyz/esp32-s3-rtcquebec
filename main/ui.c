@@ -470,11 +470,8 @@ static int fav_shown(void)                    // the favourite on view, -1 if no
     return lv_screen_active() == scr_main && p >= 1 && p <= n_favs ? p - 1 : -1;
 }
 
-static uint32_t settled_tick;                 // lv_tick of the last page settle (a tap just after is a swipe's tail)
-
 static void page_settled(int page, void *user)
 {
-    settled_tick = lv_tick_get();
     bool alerts = pager_page(pager, page) == al_page;
     ESP_LOGI(TAG, "page %d (%s)", page, page == 0 ? "system" : alerts ? "alerts" : "stop");
     if (page == 0) system_refresh();
@@ -855,13 +852,13 @@ static void map_open(int i)
     if (in) lv_indev_wait_release(in);                    // the tap that opened it doesn't also close it
 }
 
-// A tap on a stop page opens its map (a drag is slide.c's, a long-press is Wi-Fi setup). Not within 600 ms of a page
-// settling: a second quick swipe's press can reach LVGL as a tap (harness quick_swipes, 2026-10-07: it opened the map)
-#define TAP_AFTER_SWIPE_MS 600
+// A tap on a stop page opens its map (a drag is slide.c's, a long-press is Wi-Fi setup). Not during a move or within
+// 600 ms of one: a second quick swipe's press can reach LVGL as a tap (harness quick_swipes, 2026-10-07: it opened
+// the map). espforge's slide_tap_ok() since v0.3.0 (this app's guard, made generic).
 static void stop_tapped(lv_event_t *e)
 {
-    if (slide_busy() || lv_tick_elaps(settled_tick) < TAP_AFTER_SWIPE_MS) {
-        ESP_LOGI(TAG, "tap %u ms after a swipe: not a tap", (unsigned)lv_tick_elaps(settled_tick));
+    if (!slide_tap_ok()) {
+        ESP_LOGI(TAG, "tap right after a swipe: not a tap");
         return;
     }
     int i = fav_shown();

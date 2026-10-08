@@ -11,7 +11,7 @@ import time
 
 from board import CFG, SCREEN_C, check, test
 
-APP_ORDER = ['navigation', 'perf']
+APP_ORDER = ['navigation', 'perf', 'presence']
 APP_WATCH = [
     (r'display: .*did not finish', 'a panel transfer timed out'),
     (r'lvgl: .*(out of memory|alloc failed)', 'LVGL could not allocate'),
@@ -221,3 +221,44 @@ def page_swipes(ctx):
     measure(ctx, 'drag_slow', [f'drag {w * 3 // 4} {h // 2} {w // 4} {h // 2} 600'], settle=1.5)
     b.wait_screen(NEXT, 4)
     go_home(ctx)
+
+
+# ---------------------------------------------------------------- presence (espforge's forge_presence)
+
+def presence_state(b):
+    m = re.search(r'state=(\d) brightness=(\d+) .*mic=(\d)', b.cmd('presence', r'test: presence (.*)').group(1))
+    return int(m.group(1)), int(m.group(2)), m.group(3) == '1'
+
+
+@test('presence')
+def dim_off_wake(ctx):
+    """Short delays through the API (the user's settings put back after): ACTIVE -> DIM -> OFF on a stop page, then a
+    tap on the dark screen only wakes it: the board's press filter swallows it, so the map doesn't open (v0.3.0's
+    rule, now through espforge's forge_presence and board)."""
+    b = ctx.board
+    saved = b.api('/api/presence')
+    keys = ('enabled', 'margin_db', 'wake_s', 'dim_s', 'off_s', 'bright_pct', 'dim_pct', 'motion_wake')
+    orig = {k: saved[k] for k in keys}
+    try:
+        b.show(NEXT)
+        b.wait_screen(NEXT, 6)
+        _, _, mic = presence_state(b)
+        check(mic, 'the microphones are not available (board_mic_open): presence never runs')
+        at = len(ctx.log.lines())
+        b.api('/api/presence', {'enabled': True, 'margin_db': 60, 'dim_s': 2, 'off_s': 2, 'motion_wake': False})
+        ctx.log.wait(r'presence: ACTIVE -> DIM', 15, 'dims after 2 s of quiet', start=at)
+        ctx.log.wait(r'presence: DIM -> OFF', 15, 'off 2 s later', start=at)
+        time.sleep(1.5)                                  # faded out
+        state, bright, _ = presence_state(b)
+        check(state == 2 and bright == 0, f'not off: state {state}, brightness {bright}')
+        at = len(ctx.log.lines())
+        b.tap()                                          # on a lit stop page: opens its map
+        ctx.log.wait(r'presence: touch on a dark screen', 6, 'the press filter woke it', start=at)
+        time.sleep(1.5)
+        state, bright, _ = presence_state(b)
+        check(state == 0 and bright > 0, f'not awake: state {state}, brightness {bright}')
+        check(b.screen() == NEXT, f'the waking tap also acted: on {b.screen()}, not {NEXT}')
+        ctx.note('dim after 2 s, off 2 s later; a tap on the dark stop page only woke it')
+    finally:
+        b.api('/api/presence', orig)
+        b.cmd('wake')

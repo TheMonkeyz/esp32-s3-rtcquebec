@@ -34,3 +34,6 @@ version.txt
 
 # Claude Code worktrees (agents working on a branch): never part of the project
 .claude/worktrees/
+
+# espforge at the pinned tag, for host tests and the emulator (tools/fetch_forge.py)
+.espforge/

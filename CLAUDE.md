@@ -42,10 +42,18 @@ bug teaches something general; add the project-specific fact below.
 ## Built on espforge
 
 This project was created from the [espforge](https://github.com/TheMonkeyz/espforge) template (v0.2.1, 2026-10-06;
-local checkout `C:\Users\lmathieu\ESPDEV\espforge`). The framework components (`components/forge_*`,
-`dns_server`, `boards/`) and tools are copies: a framework bug fixed here gets ported to espforge (or a task for
-it), and espforge fixes get pulled in by hand. Keep app code in `main/`.
+local checkout `C:\Users\lmathieu\ESPDEV\espforge`). **Since v0.3.1 it takes espforge's components and board at a
+release tag** (as weather_amoled): forge_core, forge_net, forge_ota, forge_lvgl, forge_presence, dns_server and the
+board (`boards/ws_amoled175/board`) in `main/idf_component.yml`, all at the same tag; the component manager fetches them
+into `managed_components/`. Host tests and the emulator use `tools/fetch_forge.py` (espforge at that tag in
+`.espforge/`, git-ignored): the emulator's framework part is espforge's `web/emu/forge`. The tools (`tools/devloop`,
+`tools/harness`, `tools/webtest`, `tools/make_flasher_site.py`) are still copies: port fixes both ways.
 
+- **A framework change** is made in espforge, released there as an rc (its tests, its harness), then the tags here are
+  bumped together (delete `dependencies.lock` first). To try an unreleased espforge change here first, point the
+  entries at the checkout for one build (`override_path:`, as weather_amoled's `tools/forge_local.py`; never commit it).
+- **Keep app code in `main/`.** Screen dimming is espforge's forge_presence; this app gives it the board's
+  microphones, motion sensor, touch and brightness (`presence_hooks` in main.c).
 - **espforge backlog** (the user's rule, 2026-10-07, for esp32-s3-rtcquebec, weather_amoled and espforge): when a
   change could go into espforge (framework code, board support, tools, tests, docs, a lesson), add an entry to
   espforge's `docs/BACKLOG.md` (`C:\Users\lmathieu\ESPDEV\espforge\docs\BACKLOG.md`, its format at the top) in the
@@ -111,7 +119,8 @@ rediscover.
   live API: each guess is a request to RTC.
 - **Adding favourites without the page**: `Board.api('/api/favs', {'favs': [...]})` from tools/harness (it knows the
   key); then `snapshot.py stop`.
-- **forge_lvgl `pager_set_count()`** was added here (2026-10-06): port it to espforge.
+- **forge_lvgl `pager_set_count()` / `pager_set_order()`** were added here (2026-10-06/07): espforge has them since
+  v0.3.0.
 - **Playwright's browser** on a fresh clone: `cd tools/webtest && npm ci && npx playwright install chromium`, then
   copy `%LOCALAPPDATA%\ms-playwright` to `tools/webtest/.browsers` (git-ignored): the harness runs under the
   Microsoft Store Python, which hides AppData\Local from its child processes (L146), so without the copy its webtest

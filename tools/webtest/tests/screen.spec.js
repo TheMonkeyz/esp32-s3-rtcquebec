@@ -1,4 +1,5 @@
-// Screen dimming (presence.c): the settings load and save, calibration shows its state, texts in both languages
+// Screen dimming (espforge's forge_presence): the settings load and save, calibration shows its state and its
+// verdict ("cal"), texts in both languages
 const { test, expect, state, open, posts, table, KEY } = require('./fixtures');
 
 test('screen settings load and save', async ({ page, request }) => {
@@ -39,7 +40,7 @@ test('a value not in the choices is kept; off before dim is refused', async ({ p
   expect(await posts(request, '/api/presence')).toEqual([]);
 });
 
-test('calibrate shows "Calibrating", then the state again', async ({ page, request }) => {
+test('calibrate shows "Calibrating", then the new background noise', async ({ page, request }) => {
   await open(page);
   await expect(page.locator('#scr-state')).toContainText('Active');
   await page.locator('#scr-cal').click();
@@ -47,7 +48,10 @@ test('calibrate shows "Calibrating", then the state again', async ({ page, reque
   await expect(page.locator('#scr-state')).toContainText('Calibrating... ');
   await expect(page.locator('#scr-cal')).toBeDisabled();
   expect((await posts(request, '/api/calibrate')).map(e => e.body)).toEqual([{ seconds: 5 }]);
-  await expect(page.locator('#scr-state')).toContainText('Active', { timeout: 15000 });   // 1 s a poll in the mock
+  // The mock ends it after 5 polls (1 s apart) with cal "ok" and a baseline of -66 dBFS
+  await expect(page.locator('#msg')).toHaveText('Background noise measured: -66 dBFS.', { timeout: 15000 });
+  await expect(page.locator('#msg')).not.toHaveClass('bad');
+  await expect(page.locator('#scr-state')).toContainText('Active');
   await expect(page.locator('#scr-cal')).toBeEnabled();
 });
 
@@ -98,4 +102,25 @@ test('saving needs the key', async ({ page, request }) => {
   await expect(page.locator('#msg')).toHaveText(/scanning the QR code/);
   expect((await posts(request, '/api/presence')).map(e => e.refused)).toEqual([401]);    // refused, nothing saved
   expect((await state(request)).presence.dim_s).toBe(600);
+});
+
+test('a calibration in a noisy room says the previous level was kept', async ({ page, request }) => {
+  await open(page);
+  await expect(page.locator('#scr-state')).toContainText('Active');
+  await page.locator('#scr-cal').click();
+  await expect(page.locator('#scr-state')).toContainText('Calibrating... ');
+  await request.post('/__presence', { data: { calibrating: false, calib_left_s: 0, cal: 'noisy', cal_spread_db: 18 } });
+  await expect(page.locator('#msg')).toHaveText(
+    'The room wasn\'t quiet enough: the previous level (-60 dBFS) was kept. Try again in silence.', { timeout: 10000 });
+  await expect(page.locator('#msg')).toHaveClass('bad');
+  await expect(page.locator('#scr-cal')).toBeEnabled();
+  expect((await state(request)).presence.baseline_db).toBe(-60);
+});
+
+test('an earlier calibration\'s verdict is not shown on opening the page', async ({ page, request }) => {
+  await request.post('/__presence', { data: { cal: 'noisy' } });
+  await open(page);
+  await expect(page.locator('#scr-state')).toContainText('Active');
+  await page.waitForTimeout(3500);                                      // a second poll
+  await expect(page.locator('#msg')).toBeEmpty();
 });

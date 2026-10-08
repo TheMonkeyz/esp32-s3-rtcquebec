@@ -15,7 +15,7 @@ describe here only how this app uses them. -->
 | Microphones | ES7210 (2 mics), control on the shared I2C bus (`0x40`, 8-bit `0x80`), data I2S_NUM_0 | MCLK 42, BCLK 9, WS 45, DIN 10; DOUT 8 (ES8311 speaker, unused) |
 | USB | USB serial/JTAG (COM5 on the dev PC) | |
 
-Board support: `boards/ws_amoled175/board/` (espforge).
+Board support: espforge's `boards/ws_amoled175/board/`, at the tag in `main/idf_component.yml`.
 
 ## Tasks
 
@@ -78,11 +78,13 @@ rendered in the background); `set_text` / `set_color` change a label only when i
 
 ## Screen dimming
 
-`presence.c` (ported from weather_amoled's, 2026-10-07; its logic and limits unchanged) and `presence_sm.c` (the
-state machine, pure C, host test `tests/host/test_presence.c`). Started in `app_main` right after `board_init()`
-(it uses the board's I2C bus, `board_i2c_bus()`). Task "presence", core 0, priority 2, 4 KB stack.
+espforge's forge_presence (since v0.3.1; before, this app's `presence.c`, ported from weather_amoled's on
+2026-10-07, which espforge took as its base). Started in `app_main` right after `board_init()` with this board's
+hooks (`presence_hooks` in main.c: `board_mic_open/read`, `imu_init/read`, `touch_idle_ms`, `display_brightness`
+under the lock). Task "presence", core 0, priority 2, 4 KB stack. Its state machine and calibration are host-tested in
+espforge (`tests/host/test_presence.c`); its routes (`/api/presence`, `/api/calibrate`) are the component's.
 
-- **Microphones**: ES7210 through espressif/esp_codec_dev 1.5.11 (pinned in `main/idf_component.yml`), 16 kHz
+- **Microphones**: ES7210 through espressif/esp_codec_dev 1.5.11 (the board's, `board_audio.h`), 16 kHz
   stereo 16-bit, gain 30 dB; both I2S directions opened on I2S_NUM_0 (the TX side for a future speaker). Every 100 ms
   the RMS level of the last 100 ms in dBFS. A failed read counts as quiet and is counted in the 5 s log line
   (`presence: level ... dB (threshold ...)`). No microphone: the state stays ACTIVE, the page says so.
@@ -101,12 +103,14 @@ state machine, pure C, host test `tests/host/test_presence.c`). Started in `app_
   goes through the same path.
 - **Brightness**: `display_brightness()` under `display_lock()`, a fade of 10 % per 100 ms (~1 s full to off). The
   dimmed level is capped at the full one where it is used. LVGL keeps drawing while the screen is off.
-- **Calibration** (`POST /api/calibrate`): 5 s of levels, baseline = their 90th percentile, saved.
+- **Calibration** (`POST /api/calibrate`): 5 s of levels, baseline = their median, saved; a spread over 12 dB
+  (90th - 10th percentile: someone spoke) is refused and the previous baseline kept (`"cal":"noisy"`, the page says
+  so). Until v0.3.0 the 90th percentile: speech during it set the baseline 30 dB too high.
 - **NVS** namespace `presence`, typed keys (not weather_amoled's `cfg` blob: a blob that changes size is dropped
   on an update): `enabled` u8, `margin` u16 (0.1 dB), `wake` u16 (0.1 s), `dim` u32 (s), `off` u32 (s, after
   dimming), `bright` u8 (%), `dim_pct` u8 (%), `baseline` i16 (0.1 dBFS), `motion` u8, `motion_mg` u16 (mg,
   20..500). A missing key keeps its default; every value loaded is clamped (`presence_clamp_cfg`).
-- **Emulator**: `web/emu/emu_presence.c` stands in for presence.c: always ACTIVE, `mic_ok`/`imu_ok` false (the
+- **Emulator**: espforge's `web/emu/forge/emu_presence.c` stands in for presence.c: always ACTIVE, `mic_ok`/`imu_ok` false (the
   settings page says "No microphone"), settings kept for the session; the press filter exists in `emu_touch.c` too.
 - **To check on the device after touching it**: the 5 s log lines' levels in a quiet and a noisy room, a
   calibration, the fades, waking by voice / pick-up / touch, and that the waking touch did nothing else.

@@ -1,59 +1,52 @@
 # The display in the browser
 
-The firmware's own code, compiled to WebAssembly: LVGL 9.2.2 with the display's settings (`lv_kconfig.h`, generated
-from its sdkconfig), `main.c` (its start-up runs as a task, and its settings-page routes), `ui.c`, `app_text.c`,
-`rtc_api.c`, `favs.c`, `departures.c`, forge_lvgl's `forge_lvgl.c`, `pager.c`, `slide.c`, `screens.c`, forge_core's
-`i18n.c`, `i18n_nvs.c`, `textfit.c`, `testcon_registry.c`, forge_net's `svc.c` and forge_ota's `ota_web.c`, all
-unchanged. Only the hardware and the network stack are replaced:
+The firmware's own code, compiled to WebAssembly: LVGL 9.2.2 with the display's settings (`lv_kconfig.h` and
+`sdkconfig.h`, generated from its sdkconfig), `main.c` (its start-up runs as a task, and its settings-page routes),
+`ui.c`, `app_text.c`, `rtc_api.c`, `favs.c`, `departures.c`, `map.c`, `geo.c`, and espforge's components, all unchanged.
+Only the hardware and the network stack are replaced, by **espforge's `web/emu/forge`** at the tag in
+`main/idf_component.yml` (since v0.3.1; `tools/fetch_forge.py` puts it in `.espforge/`): the board, touch,
+`esp_http_client` as `fetch()`, NVS in `localStorage`, FreeRTOS tasks as fibers, the web server for the settings page,
+`localtime_r` following TZ, screen dimming without microphones (`emu_presence.c`), and the page's script
+(`emu-page.js`). Its README says what each file stands in for. This folder holds only what is this app's:
 
-| File | Stands in for |
+| File | What |
 |---|---|
-| `emu_display.c` | the board (`board.h`): `board_init()` (LVGL, display, touch, forge_lvgl's panel hooks) and the AMOLED panel, a 466x466 RGB565 framebuffer that `index.html` copies to a round canvas |
-| `emu_touch.c` | the touch chip: the mouse or a finger on the canvas |
-| `emu_http.c` | `esp_http_client`: `fetch()`, awaited with ASYNCIFY (RTC's API answers `Access-Control-Allow-Origin: *`) |
-| `emu_nvs.c` | NVS: the favourites and the language, kept in the page's `localStorage` (`rtcquebec_emu_nvs`) |
-| `emu_stubs.c` | Wi-Fi (always connected to "browser", so `app_main` goes straight to the stops), updates (none; Restart reloads the page), diag, the test console |
-| `emu_web.c` | the web server: the settings page below the emulator (`build/settings.html`, the display's `main/web/index.html` with `emu-settings.js` first in its head) queues its `/api/` requests, served here between LVGL frames by the display's own handlers (main.c's, ota_web.c's); `/api/info` as forge_net's web.c; Wi-Fi scan and save answer that they need the real display |
-| `emu_tasks.c` | FreeRTOS tasks, queues and binary semaphores: each task an Emscripten fiber, run by the main loop between LVGL frames; a wait inside a task (`vTaskDelay`, `ulTaskNotifyTake`, a request) goes back to the main loop. `app_main`, departures.c's "deps" and ui.c's "setup_radio" run as is |
-| `emu_time.c` | `localtime_r` for the firmware's files (`-Dlocaltime_r=emu_localtime_r`): the POSIX TZ main.c sets (Eastern time), which Emscripten ignores |
-| `emu_main.c` | the scheduler and LVGL's task: demo favourites for a new visitor, then `app_main` as a task, then the loop |
-| `shim/` | ESP-IDF and FreeRTOS headers; `vTaskDelay` hands control back to the browser (`emscripten_sleep`) |
+| `Makefile` | the app's sources (`APP_SRC`), `emu_main.c`, the embedded font, `png_rows.c` for the map's tiles (with miniz's tinfl); the rules are espforge's `emu.mk` |
+| `emu_main.c` | demo favourites for a new visitor, a stop from the page's address (`emu_param`), then `app_main` as a task and the loop |
+| `index.html` | the page's words and look |
+| `lv_kconfig.h`, `sdkconfig.h` | `make config` from the firmware's sdkconfig (commit both: CI builds the emulator without the firmware) |
 
-The firmware itself has one `#ifdef EMU_BUILD`: `ui.c` finds its font as an array here (`build/fonts.c`).
+The firmware itself has one `#ifdef EMU_BUILD`: `ui.c` finds its font as an array here.
 
 Left out (the display has them, the browser doesn't need them): Wi-Fi setup and Easy Connect (a long-press still opens
-the setup screen, with nothing behind it), updates, the test console, diag, snapshots, the motion sensor.
+the setup screen, with nothing behind it), updates, the test console, diag, snapshots, the microphones and the motion
+sensor.
 
 ## Build (WSL)
 
 ```bash
 git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk && ~/emsdk/emsdk install 6.0.11 && ~/emsdk/emsdk activate 6.0.11
 source ~/emsdk/emsdk_env.sh
-cd web/emu && make -j8      # build/emu.js, build/emu.wasm (~0.9 MB), build/index.html; ~1 min the first time
+python3 tools/fetch_forge.py                # espforge at the pinned tag, in .espforge/
+cd web/emu && make -j8                      # build/: emu.js, emu.wasm (~1 MB), index.html, settings.html...
 ```
 
 It needs LVGL where ESP-IDF's component manager puts it (`managed_components/lvgl__lvgl`, from a firmware build) and
-ESP-IDF's cJSON (`IDF_PATH`, default `/mnt/c/Espressif/esp-idf`); `LVGL=` and `CJSON=` override them (a git worktree
-has no `managed_components`: `LVGL=<main checkout>/managed_components/lvgl__lvgl`). Serve `build/` over HTTP
-(`.claude/launch.json`: "emulator", port 8766, or `python -m http.server 8766 -d web/emu/build`); `file://` can't load
-the WebAssembly. `build/fonts/` holds the page's font for a local run (on the site it comes from `../fonts/`).
-
-`try.sh <file.c>` compiles one file with the emulator's flags and shows the first errors.
-
-After changing LVGL options in `sdkconfig.defaults`: `python3 web/emu/gen_lv_kconfig.py build/v55/sdkconfig > web/emu/lv_kconfig.h`.
+ESP-IDF's cJSON (`IDF_PATH`, default `/mnt/c/Espressif/esp-idf`); `LVGL=`, `CJSON=` and `ESPFORGE=` (an espforge
+checkout, to try an unreleased change) override them. Serve `build/` over HTTP (`.claude/launch.json`: "emulator",
+port 8766, or `python -m http.server 8766 -d web/emu/build`); `file://` can't load the WebAssembly. `make try
+F=../../main/ui.c` compiles one file and shows the first errors; `make config` after changing LVGL or `FORGE_*`
+options. Smoke test: `cd tools/webtest && node ../../.espforge/web/emu/forge/smoke.js ../../web/emu/build shots`.
 
 ## On the flasher site
 
-`python tools/make_flasher_site.py site --stable dist --emu web/emu/build` copies `index.html`, `emu.js`, `emu.wasm`,
-`settings.html` and `emu-settings.js` to the site's `try/` and adds `"try": "try/"` to `channels.json`; the flasher
-page then shows *Try it in your browser* (hidden on a site built without `--emu`). `index.html` uses the site's font
-from `../fonts/`.
+`python tools/make_flasher_site.py site --stable dist --emu web/emu/build` copies the build's files to the site's
+`try/` and adds `"try": "try/"` to `channels.json`; the flasher page then shows *Try it in your browser*.
 
 CI (`.github/workflows/firmware.yml`, job `emulator`) builds it on every push, from the latest stable release (the tag
-itself when a stable tag is pushed; with no stable release yet, or one older than the emulator, the pushed commit is
-built, said in the log), with LVGL from GitHub at the firmware's version (`main/idf_component.yml`), cJSON 1.7.19
-(ESP-IDF 5.5.4's) and Emscripten 6.0.11. The `pages` job adds it to the site; if the emulator build fails, the site is
-published without it.
+itself when a stable tag is pushed), with LVGL from GitHub at the firmware's version, cJSON 1.7.19 and Emscripten
+6.0.11 (and espforge's tag when that release takes it). The `pages` job adds it to the site; if the emulator build
+fails, the site is published without it.
 
 ## Notes
 
@@ -70,7 +63,7 @@ published without it.
 - `main.c` is not rewritten for the browser: `app_main` runs as a task (fiber) with the stubs saying Wi-Fi is up, so
   start-up order, the routes' registration and `ui_home()` are the firmware's.
 - A request from the settings page that needs RTC (Find directions, Add) waits in its handler for the deps task, as on
-  the display: the main loop runs the tasks meanwhile (`emu_sem_take`), but LVGL doesn't draw until it is answered
+  the display: the main loop runs the tasks meanwhile (espforge's `emu_tasks.c`), but LVGL doesn't draw until it is answered
   (~0.1-0.5 s).
 - The times are Québec's whatever the visitor's time zone (`emu_time.c`): "Updated at", the clock and the service date
   RTC is asked for.
