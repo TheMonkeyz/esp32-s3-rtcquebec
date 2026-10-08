@@ -8,6 +8,10 @@ How to write an entry: add a `## vX.Y.Z - YYYY-MM-DD` section at the top **befor
 `- ` line per change, written for the person holding the display. Release candidates get their own
 `## vX.Y.Z-rc.N - YYYY-MM-DD` section, shown only to Beta users; the final release's section lists everything again.
 
+## v0.3.1 - 2026-10-07
+- Measuring the background noise can no longer go wrong when someone talks during it: the settings page says the room wasn't quiet enough and keeps the previous level. When it works, it shows the level measured.
+- Behind the scenes: the display now uses espforge's own parts at a tested release (v0.3.0: Wi-Fi, updates, screens, screen dimming, the board) instead of copies of them, with a little more of the scarcest memory left free; nothing else changes on the screen.
+
 ## v0.3.1-rc.2 - 2026-10-07
 - Behind the scenes: espforge's stable v0.3.0 (the same parts as rc.1, with a little more of the scarcest memory left free).
 
