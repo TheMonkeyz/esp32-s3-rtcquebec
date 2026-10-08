@@ -13,6 +13,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
 import forgecfg  # noqa: E402
 from board import CFG, SUITES, english_netsh, kv, Fail  # noqa: E402
+import harness  # noqa: E402
 from harness import BAD, BASELINE, ORDER, compare, parse_args, propose, suite_of  # noqa: E402
 
 BASE = {
@@ -36,6 +37,13 @@ def write(path, data):
 
 def verdicts(rows):
     return {k: v for k, _, _, v in rows}
+
+
+def snapshot_screens(base):
+    """The screens the baseline has snapshot times for; None for a new project's empty baseline."""
+    if not base:
+        return None
+    return {k.split('.', 1)[1] for k in base if k.startswith('snapshot_ms.')}
 
 
 class Compare(unittest.TestCase):
@@ -103,9 +111,15 @@ class Baseline(unittest.TestCase):
             self.assertIn(s, ORDER)
 
     def test_snapshot_metrics_follow_forge_screens(self):
-        base = load_json(BASELINE)
-        snaps = {k.split('.', 1)[1] for k in base if k.startswith('snapshot_ms.')}
+        snaps = snapshot_screens(load_json(BASELINE))
+        if snaps is None:
+            self.skipTest('baseline.json is {} (a new project): the first harness run writes it (docs/NEW-PROJECT.md)')
         self.assertEqual(snaps, set(CFG['screens']))
+
+    def test_a_new_projects_empty_baseline_is_skipped(self):
+        # NEW-PROJECT resets the baseline to {}: CI failed on it until the first harness run (esp32-s3-rtcquebec)
+        self.assertIsNone(snapshot_screens({}))
+        self.assertEqual(snapshot_screens({'snapshot_ms.home': 90, 'fps.x': 1}), {'home'})
 
 
 class Args(unittest.TestCase):
@@ -113,6 +127,13 @@ class Args(unittest.TestCase):
         o = parse_args([])
         self.assertNotIn('ota', o.run)
         self.assertIn('boot', o.run)
+
+    def test_quick_leaves_out_the_slow_suites(self):
+        o = parse_args(['--quick'])
+        self.assertNotIn('idle_stable', o.run)
+        self.assertNotIn('wifi_setup', o.run)
+        self.assertIn('web', o.run)                          # the web suite's device tests stay; Playwright doesn't
+        self.assertEqual(parse_args(['--quick', 'idle_stable']).run, ['idle_stable'])   # asked for: run
 
     def test_ota_flag_adds_the_suite_and_expect(self):
         o = parse_args(['--ota', 'v1.2.0-rc.1'])
@@ -125,6 +146,19 @@ class Args(unittest.TestCase):
         self.assertEqual(o.flash, CFG['build_dir'])
         o = parse_args(['--flash', 'boot'])                  # a suite name after --flash is a suite
         self.assertEqual((o.run, o.flash), (['boot'], CFG['build_dir']))
+
+    def test_wifi_setup_only_by_default_on_windows(self):
+        # netsh, and a PC that stays online over Ethernet while its Wi-Fi is on the setup network (docs/MACOS.md)
+        old = harness.WINDOWS
+        try:
+            harness.WINDOWS = True
+            self.assertIn('wifi_setup', parse_args([]).run)
+            harness.WINDOWS = False
+            self.assertNotIn('wifi_setup', parse_args([]).run)
+            self.assertIn('wifi_runtime', parse_args([]).run)
+            self.assertEqual(parse_args(['wifi_setup']).run, ['wifi_setup'])   # still there when asked for
+        finally:
+            harness.WINDOWS = old
 
 
 class LogWaits(unittest.TestCase):
