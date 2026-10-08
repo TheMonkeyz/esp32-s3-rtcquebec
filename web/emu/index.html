@@ -60,7 +60,7 @@ canvas:active{cursor:grabbing}
   <div>
     <div class="device"><div class="bezel"><canvas id="screen" width="466" height="466"
       aria-label="The display's screen. Drag or tap on it."></canvas></div></div>
-    <p class="status" id="status">Starting…</p>
+    <p class="status" id="status" data-error="The emulator could not start:">Starting…</p>
   </div>
   <div class="info">
     <h1>Try it in your browser</h1>
@@ -84,61 +84,6 @@ canvas:active{cursor:grabbing}
   <div class="phone"><iframe id="settings" src="settings.html#k=0000000000000000" title="The display's settings page"></iframe></div>
 </section>
 <script src="emu.js"></script>
-<script>
-// The settings page below (settings.html, emu-settings.js) sends its /api/ requests here; the emulator serves them
-// between frames (emu_web.c reads Module.emuApiQ and answers through Module.emuApiWait)
-const apiQ = [], apiWait = {};
-let apiId = 0;
-window.emuApi = (method, path, body) => new Promise(done => {
-  const id = ++apiId;
-  apiWait[id] = done;
-  apiQ.push({ id, method, path, body });
-});
-addEventListener('message', e => {
-  if (e.origin === location.origin && e.data && e.data.emuSettingsHeight)
-    document.getElementById('settings').style.height = Math.max(400, e.data.emuSettingsHeight) + 'px';
-});
-(async () => {
-  const canvas = document.getElementById('screen'), ctx = canvas.getContext('2d');
-  const status = document.getElementById('status');
-  const img = ctx.createImageData(466, 466), rgba = new Uint32Array(img.data.buffer);
-  const M = await RtcEmu({ print: t => console.log(t), printErr: t => console.log(t) });
-  M.emuApiQ = apiQ;
-  M.emuApiWait = apiWait;
-  status.textContent = '';
-  const fb = M._emu_fb() >> 1;                       // RGB565 framebuffer, in 16-bit words
-  // RGB565 -> RGBA (little-endian Uint32: A B G R), whenever the firmware drew something
-  const draw = () => {
-    if (M._emu_fb_dirty()) {
-      const p = M.HEAPU16.subarray(fb, fb + 466 * 466);
-      for (let i = 0; i < p.length; i++) {
-        const v = p[i];
-        const r = (v >> 11) * 255 / 31, g = ((v >> 5) & 63) * 255 / 63, b = (v & 31) * 255 / 31;
-        rgba[i] = 0xff000000 | (b << 16) | (g << 8) | r;
-      }
-      ctx.putImageData(img, 0, 0);
-    }
-    const level = M._emu_brightness();
-    if (level !== shown) { shown = level; canvas.style.filter = level >= 255 ? '' : `brightness(${(level / 255).toFixed(3)})`; }
-    requestAnimationFrame(draw);
-  };
-  let shown = 255;
-  requestAnimationFrame(draw);
-  // The finger: pointer events in the canvas's own 466x466 pixels
-  const at = e => {
-    const r = canvas.getBoundingClientRect();
-    return [Math.round((e.clientX - r.left) * 466 / r.width), Math.round((e.clientY - r.top) * 466 / r.height)];
-  };
-  let down = false;
-  canvas.addEventListener('pointerdown', e => {
-    down = true; canvas.setPointerCapture(e.pointerId); M._emu_touch(1, ...at(e));
-  });
-  canvas.addEventListener('pointermove', e => { if (down) M._emu_touch(1, ...at(e)); });
-  const up = e => { if (!down) return; down = false; M._emu_touch(0, ...at(e)); };
-  canvas.addEventListener('pointerup', up);
-  canvas.addEventListener('pointercancel', up);
-  canvas.addEventListener('contextmenu', e => e.preventDefault());
-})().catch(e => { document.getElementById('status').textContent = 'The emulator could not start: ' + e; });
-</script>
+<script src="emu-page.js"></script>
 </body>
 </html>

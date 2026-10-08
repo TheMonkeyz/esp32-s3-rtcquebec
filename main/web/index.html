@@ -153,7 +153,9 @@ const I18N = {
     off_after: 'Turn off after (quiet in all)', bright: 'Brightness (%)', dimmed: 'Dimmed (%)',
     motion_wake: 'Light up when the display is picked up or moved', save: 'Save',
     calibrate: 'Measure the background noise (stay quiet 5 s)',
-    cal_hint: 'Do it once where the display stays: the screen then lights up on sounds louder than the room.',
+    cal_ok: 'Background noise measured: {b} dBFS.',
+    cal_noisy: 'The room wasn\'t quiet enough: the previous level ({b} dBFS) was kept. Try again in silence.',
+    cal_hint: 'Do it once where the display stays: the screen then lights up on sounds louder than its background noise.',
     st_active: 'Active', st_dim: 'Dimmed', st_off: 'Off', st_cal: 'Calibrating... {s} s',
     no_mic: 'No microphone: the screen stays on', state_line: '{s} · brightness {p} %',
     level: 'Sound {l} dB · lights up above {th} dB', cal_start: 'Stay quiet: measuring the background noise for 5 s.',
@@ -182,10 +184,13 @@ const I18N = {
     off_after: 'Éteindre après (silence au total)', bright: 'Luminosité (%)', dimmed: 'Luminosité tamisée (%)',
     motion_wake: 'Rallumer l\'écran quand on soulève ou déplace l\'appareil', save: 'Enregistrer',
     calibrate: 'Mesurer le bruit de fond (silence 5 s)',
-    cal_hint: 'À faire une fois à l\'endroit où l\'appareil restera : l\'écran se rallume ensuite sur un son plus fort que la pièce.',
+    cal_ok: 'Bruit de fond mesuré : {b} dBFS.',
+    cal_noisy: 'La pièce n\'était pas assez silencieuse : le niveau précédent ({b} dBFS) a été conservé. ' +
+               'Réessayez en gardant le silence.',
+    cal_hint: 'À faire une fois à l\'endroit où l\'appareil restera : l\'écran se rallume ensuite sur un son plus fort que le bruit ambiant.',
     st_active: 'Allumé', st_dim: 'Tamisé', st_off: 'Éteint', st_cal: 'Mesure du bruit de fond... {s} s',
     no_mic: 'Aucun microphone : l\'écran reste allumé', state_line: '{s} · luminosité {p} %',
-    level: 'Son {l} dB · se rallume au-dessus de {th} dB', cal_start: 'Gardez le silence : mesure du bruit de fond pendant 5 s.',
+    level: 'Son {l} dB · l\'écran se rallume au-dessus de {th} dB', cal_start: 'Gardez le silence : mesure du bruit de fond pendant 5 s.',
     cal_na: 'Mesure impossible pour le moment : aucun microphone, ou une mesure est déjà en cours.',
     off_longer: 'L\'écran doit s\'éteindre après avoir été tamisé.', not_saved: 'Non enregistré.',
     n_s: '{n} s', n_min: '{n} min', n_h: '{n} h'
@@ -411,6 +416,9 @@ function fillDur(sel, choices, v) {                         // the choices, and 
 }
 
 function showScreen(p) {
+  // A calibration this page saw end: its verdict ("noisy": the display kept the previous baseline)
+  if (screen && screen.calibrating && !p.calibrating && (p.cal === 'ok' || p.cal === 'noisy'))
+    say(t('cal_' + p.cal, { b: Math.round(p.baseline_db) }), p.cal === 'noisy');
   screen = p;
   const name = p.calibrating ? t('st_cal', { s: Math.ceil(p.calib_left_s) }) :
                !p.mic_ok ? t('no_mic') : t('st_' + p.state);

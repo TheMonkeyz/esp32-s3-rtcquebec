@@ -136,6 +136,8 @@ jobs:
           mkdir -p cjson
           curl -fsSL -o cjson/cJSON.c https://raw.githubusercontent.com/DaveGamble/cJSON/v1.7.19/cJSON.c
           curl -fsSL -o cjson/cJSON.h https://raw.githubusercontent.com/DaveGamble/cJSON/v1.7.19/cJSON.h
+      - name: espforge (the components at the tag in main/idf_component.yml)
+        run: python3 tools/fetch_forge.py
       - name: Host tests
         run: make -C tests/host CJSON="$PWD/cjson"
       - name: Harness unit tests
@@ -170,6 +172,9 @@ jobs:
           mkdir -p cjson
           curl -fsSL -o cjson/cJSON.c https://raw.githubusercontent.com/DaveGamble/cJSON/v1.7.19/cJSON.c
           curl -fsSL -o cjson/cJSON.h https://raw.githubusercontent.com/DaveGamble/cJSON/v1.7.19/cJSON.h
+      - name: espforge (when that firmware takes its components from it, since v0.3.1)
+        run: |
+          if grep -q '^ *forge_core:' main/idf_component.yml; then python3 tools/fetch_forge.py; else echo "framework copies in the tree"; fi
       - name: Emscripten 6.0.11 (the version the emulator was tested with)
         run: |
           git clone -q --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
@@ -179,7 +184,9 @@ jobs:
           source "$HOME/emsdk/emsdk_env.sh"
           make -C web/emu -j4 LVGL="$PWD/lvgl" CJSON="$PWD/cjson"
           mkdir -p emu
-          for f in index.html emu.js emu.wasm settings.html emu-settings.js; do cp "web/emu/build/$f" emu/; done
+          for f in index.html emu.js emu.wasm settings.html emu-settings.js emu-page.js; do
+            if [ -f "web/emu/build/$f" ]; then cp "web/emu/build/$f" emu/; fi   # emu-page.js: since v0.3.1
+          done
           ls -l emu
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:

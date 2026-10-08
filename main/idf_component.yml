@@ -1,3 +1,33 @@
 dependencies:
   lvgl/lvgl: "9.2.2"   # pinned: LVGL versions differ in internals the framework relies on (docs/LESSONS.md)
-  espressif/esp_codec_dev: "1.5.11"   # the microphones (presence.c); pinned as in weather_amoled ("~1.5.2" floated)
+  # espforge's components and board, at a release tag (as weather_amoled): this display only takes espforge versions
+  # that passed their own tests. Bump every version together (tools/fetch_forge.py reads forge_core's); delete
+  # dependencies.lock when you do. The board brings esp_codec_dev (the microphones).
+  forge_core:
+    git: https://github.com/TheMonkeyz/espforge.git
+    path: components/forge_core
+    version: v0.3.0-rc.1
+  forge_net:
+    git: https://github.com/TheMonkeyz/espforge.git
+    path: components/forge_net
+    version: v0.3.0-rc.1
+  forge_ota:
+    git: https://github.com/TheMonkeyz/espforge.git
+    path: components/forge_ota
+    version: v0.3.0-rc.1
+  forge_lvgl:
+    git: https://github.com/TheMonkeyz/espforge.git
+    path: components/forge_lvgl
+    version: v0.3.0-rc.1
+  forge_presence:
+    git: https://github.com/TheMonkeyz/espforge.git
+    path: components/forge_presence
+    version: v0.3.0-rc.1
+  dns_server:
+    git: https://github.com/TheMonkeyz/espforge.git
+    path: components/dns_server
+    version: v0.3.0-rc.1
+  board:
+    git: https://github.com/TheMonkeyz/espforge.git
+    path: boards/ws_amoled175/board
+    version: v0.3.0-rc.1

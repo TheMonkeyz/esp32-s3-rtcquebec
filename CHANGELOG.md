@@ -8,6 +8,10 @@ How to write an entry: add a `## vX.Y.Z - YYYY-MM-DD` section at the top **befor
 `- ` line per change, written for the person holding the display. Release candidates get their own
 `## vX.Y.Z-rc.N - YYYY-MM-DD` section, shown only to Beta users; the final release's section lists everything again.
 
+## v0.3.1-rc.1 - 2026-10-07
+- Measuring the background noise can no longer go wrong when someone talks during it: the settings page says the room wasn't quiet enough and keeps the previous level. When it works, it shows the level measured.
+- Behind the scenes: the display now uses espforge's own parts at a tested release (Wi-Fi, updates, screens, screen dimming, the board) instead of copies of them; nothing else changes on the screen.
+
 ## v0.3.0 - 2026-10-07
 - The screen dims when the room has been quiet for 10 minutes and turns off after an hour; it lights up again when there is sound for a few seconds, when you pick up or move the display, or when you touch it.
 - The touch that lights up a dark screen does only that: it doesn't open a map or change the page.
