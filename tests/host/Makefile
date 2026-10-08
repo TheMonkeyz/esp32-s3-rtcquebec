@@ -16,7 +16,7 @@ MAIN := ../../main
 OUT := build
 CFLAGS := -std=gnu11 -D_DEFAULT_SOURCE -g -O1 -Wall -Wno-unused-function -fsanitize=address,undefined \
           -fno-sanitize-recover=undefined -Ishim -I$(CORE)/include -I$(MAIN) -include shim/host.h
-TESTS := i18n rtc_api geo
+TESTS := i18n rtc_api
 
 all: $(TESTS:%=$(OUT)/test_%)
 	@set -e; for t in $(TESTS); do ./$(OUT)/test_$$t; done
@@ -27,8 +27,6 @@ $(OUT)/test_i18n: test_i18n.c $(CORE)/i18n.c $(CORE)/include/forge_i18n.h $(MAIN
 # rtc_api.c parses RTC's replies with cJSON (ESP-IDF's copy); the replies are in data/
 $(OUT)/test_rtc_api: test_rtc_api.c $(MAIN)/rtc_api.c $(MAIN)/rtc_api.h | $(OUT)
 	$(CC) $(CFLAGS) -I$(CJSON) -o $@ test_rtc_api.c $(MAIN)/rtc_api.c $(CJSON)/cJSON.c -lm
-$(OUT)/test_geo: test_geo.c $(MAIN)/geo.c $(MAIN)/geo.h | $(OUT)
-	$(CC) $(CFLAGS) -o $@ test_geo.c $(MAIN)/geo.c -lm
 $(OUT):
 	mkdir -p $(OUT)
 clean:

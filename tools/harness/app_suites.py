@@ -104,9 +104,9 @@ def tap_opens_map(ctx):
     b.tap()
     b.wait_screen('map', 6)
     # The tiles: downloaded at the first opening of this run (the screens suite's, or this one), then kept
-    if not ctx.log.count(r'map: zoom \d+ at', start=0):
-        ctx.log.wait(r'map: zoom \d+ at', 30, 'the map tiles', start=at)
-    tiles = re.findall(r'map: zoom \d+ at \S+: (\d+)/(\d+) tiles', '\n'.join(ctx.log.lines()))
+    if not ctx.log.count(r'fmap: zoom \d+ at', start=0):
+        ctx.log.wait(r'fmap: zoom \d+ at', 30, 'the map tiles', start=at)
+    tiles = re.findall(r'fmap: zoom \d+ at \S+: (\d+)/(\d+) tiles', '\n'.join(ctx.log.lines()))
     check(tiles and tiles[-1][0] == tiles[-1][1], f'map tiles: {tiles[-1] if tiles else "none"}')
     ctx.log.wait(r'deps: GET /ListeAutobus_Parcours', 30, 'the buses asked for', start=at)
     b.tap()
@@ -138,7 +138,7 @@ def map_zoom(ctx):
         b.cmd(cmd)
         m = ctx.log.wait(r'ui: map zoom (\d+)', 5, f'{cmd}: a new zoom', start=at)
         z = int(m.group(1))
-        ctx.log.wait(r'map: zoom %d at' % z, 30, f'zoom {z} tiles (downloaded or kept)', start=at)
+        ctx.log.wait(r'fmap: zoom %d at' % z, 30, f'zoom {z} tiles (downloaded or kept)', start=at)
         check(b.screen() == 'map', f'{cmd} closed the map')
         seen.append(z)
     check(seen[1] == seen[0] - 1 and seen[2] == seen[1] - 1, f'zooms {seen}')

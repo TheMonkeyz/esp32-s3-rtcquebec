@@ -24,7 +24,6 @@
 #include "app_text.h"
 #include "departures.h"
 #include "map.h"
-#include "geo.h"
 
 static const char *TAG = "ui";
 
@@ -575,7 +574,7 @@ void ui_deps_changed(int i)
 }
 
 /* ---------- map screen ----------
- * A tap on a stop page: the street map around the stop (map.c: OpenStreetMap tiles, dimmed), the route's path in the
+ * A tap on a stop page: the street map around the stop (espforge's forge_map: OpenStreetMap tiles, dimmed), the route's path in the
  * favourite's direction (RTC's polylines, all its variants) in blue, the stop at the centre, the route's buses heading
  * that way (departures.c, every 20 s while the map is open) as small green buses, only those inside the round map (the
  * user's choice, 2026-10-07: a bus beyond it isn't shown). Swipe down to zoom in, up to zoom out (as weather_amoled's
@@ -595,8 +594,8 @@ static float *mp_ll;                                       // ...as deps_trace()
 #define PATH_STEP 3                                        // a point closer than this to the last one drawn is skipped
 // mp_fav (top of the file): the favourite whose map is open, -1 if none
 static bool mp_view_set;                                  // the picture for its stop is chosen (map_show)
-static map_view_t mp_view;                                // the zoom asked for (markers and path use it)
-static map_view_t mp_shown;                               // the picture on view: mp_view's, or the previous zoom's, scaled
+static fmap_view_t mp_view;                                // the zoom asked for (markers and path use it)
+static fmap_view_t mp_shown;                               // the picture on view: mp_view's, or the previous zoom's, scaled
 static int mp_zoom = MAP_ZOOM;                            // the last zoom chosen (kept while the device runs)
 static lv_timer_t *mp_idle;
 
@@ -668,7 +667,7 @@ static bool on_screen(double lat, double lon, double *sx, double *sy)
 }
 
 // Put a picture on view at its own scale
-static void show_picture(const map_view_t *v)
+static void show_picture(const fmap_view_t *v)
 {
     mp_shown = *v;
     mp_dsc.data = (const uint8_t *)v->px;
@@ -714,20 +713,20 @@ static void map_refresh(void)
     char buf[96];
     // The picture: once the stop's place is known (its first departures reply)
     if (!mp_view_set && e.state == DEP_OK && (e.board.lat || e.board.lon)) {
-        map_show(e.board.lat, e.board.lon, mp_zoom, &mp_view);
+        fmap_set_center(e.board.lat, e.board.lon, mp_zoom, &mp_view);
         mp_view_set = true;
         show_picture(&mp_view);
         lv_obj_remove_flag(mp_img, LV_OBJ_FLAG_HIDDEN);
         map_path();                                       // a path already fetched (the same route's map again)
     }
     if (mp_view_set) {
-        map_view_t now;
-        map_status(&now);
+        fmap_view_t now;
+        fmap_status(&now);
         if (now.px == mp_view.px) {
             mp_view = now;
             if (mp_shown.px != mp_view.px) {
                 // A new zoom: its picture replaces the scaled one once complete (or once loading gave up)
-                if (mp_view.state != MAP_LOADING) show_picture(&mp_view);
+                if (mp_view.state != FMAP_LOADING) show_picture(&mp_view);
             } else if (now.done != mp_shown.done || now.state != mp_shown.state) {
                 mp_shown = now;
                 lv_image_cache_drop(&mp_dsc);
@@ -764,8 +763,8 @@ static void map_refresh(void)
     // The bottom line: the map or the RTC failing, else the next bus
     time_t t = time(NULL);
     lv_color_t c = C_TEXT;
-    if (mp_view_set && mp_view.state == MAP_FAILED && mp_view.done == 0) { snprintf(buf, sizeof(buf), "%s", tr(T_MAP_NO_TILES)); c = C_BAD; }
-    else if (!mp_view_set || (mp_view.state == MAP_LOADING && mp_view.done == 0)) snprintf(buf, sizeof(buf), "%s", tr(T_MAP_LOADING));
+    if (mp_view_set && mp_view.state == FMAP_FAILED && mp_view.done == 0) { snprintf(buf, sizeof(buf), "%s", tr(T_MAP_NO_TILES)); c = C_BAD; }
+    else if (!mp_view_set || (mp_view.state == FMAP_LOADING && mp_view.done == 0)) snprintf(buf, sizeof(buf), "%s", tr(T_MAP_LOADING));
     else if (failing && (!fetched || t - fetched > 2 * 60)) { snprintf(buf, sizeof(buf), "%s", tr(T_DEP_OFFLINE)); c = C_BAD; }
     else if (fetched && nb == 0) snprintf(buf, sizeof(buf), "%s", tr(T_MAP_NO_BUS));
     else {
@@ -794,8 +793,8 @@ static void map_zoom(int step)
     dep_entry_t e;
     if (!deps_get(mp_fav, &e) || e.state != DEP_OK) return;
     ESP_LOGI(TAG, "map zoom %d", z);
-    map_show(e.board.lat, e.board.lon, z, &mp_view);
-    if (mp_view.state != MAP_LOADING) show_picture(&mp_view);
+    fmap_set_center(e.board.lat, e.board.lon, z, &mp_view);
+    if (mp_view.state != FMAP_LOADING) show_picture(&mp_view);
     else {                                                // the previous picture, scaled, meanwhile
         int scale = (int)lround(256 * pow(2, mp_view.zoom - mp_shown.zoom));
         lv_image_set_scale(mp_img, scale < 32 ? 32 : scale > 2048 ? 2048 : scale);
@@ -865,7 +864,7 @@ static void stop_tapped(lv_event_t *e)
     if (i >= 0) map_open(i);
 }
 
-static void map_updated(void)                             // map.c's task: a tile was drawn
+static void map_updated(void *user)                       // forge_map's task: a tile was drawn
 {
     display_lock(-1);
     if (lv_screen_active() == scr_map) map_refresh();
@@ -1315,5 +1314,11 @@ void ui_init(void)
     lv_screen_load(scr_msg);
     display_unlock();
     web_set_snapshot(screens_snapshot, screens_snapshot_free);
-    map_init(map_updated);
+    fmap_opts_t mo;
+    fmap_opts_default(&mo, MAP_SIZE, MAP_SIZE);          // OSM's tiles, dimmed as before, "OpenStreetMap" service
+    mo.zoom_min = MAP_ZOOM_MIN;
+    mo.zoom_max = MAP_ZOOM_MAX;
+    mo.psram_slots = MAP_SLOTS;
+    mo.updated = map_updated;
+    if (!fmap_create(&mo)) ESP_LOGE(TAG, "no street map (forge_map)");
 }
