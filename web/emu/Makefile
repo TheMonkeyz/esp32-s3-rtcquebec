@@ -13,12 +13,12 @@ COMP := $(ESPFORGE)/components
 BOARD := $(ESPFORGE)/boards/ws_amoled175/board/include
 
 # main/'s sources, built unchanged (main/CMakeLists.txt SRCS)
-APP_SRC := main.c ui.c app_text.c rtc_api.c favs.c departures.c map.c geo.c
+APP_SRC := main.c ui.c app_text.c rtc_api.c favs.c departures.c
 # This app's own emulator file: main(), the two demo stops, a stop from the page's address
 APP_EMU := emu_main.c
 # What main/CMakeLists.txt embeds that the app reads: the font, as ttf_start / ttf_end (ui.c)
 EMBED := ttf=../../main/montserrat.ttf
-# More of the framework than the starter: the map's tiles (png_rows, with miniz's tinfl)
-FORGE_CORE += png_rows.c
+# More of the framework than the starter: the street map (forge_map; with png_rows and miniz's tinfl)
+USE_MAP := 1
 
 include $(FORGE_EMU)/emu.mk
