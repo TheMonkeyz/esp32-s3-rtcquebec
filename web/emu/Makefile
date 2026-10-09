@@ -20,5 +20,7 @@ APP_EMU := emu_main.c
 EMBED := ttf=../../main/montserrat.ttf
 # More of the framework than the starter: the street map (forge_map; with png_rows and miniz's tinfl)
 USE_MAP := 1
+# The Settings screen a long press opens (espforge's forge_settings)
+USE_SETTINGS := 1
 
 include $(FORGE_EMU)/emu.mk
