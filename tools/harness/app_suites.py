@@ -1,4 +1,4 @@
-"""The app's own tests (main/: the system page and the stop pages, setup on a long-press). Same registry (@test from
+"""The app's own tests (main/: the stops, their alerts and map, Settings on a long press, Wi-Fi setup). Same registry (@test from
 board.py), same ctx as core_suites.py.
 
     APP_ORDER       the app's suites, run after the core start-up checks (harness.py)
@@ -18,15 +18,21 @@ APP_WATCH = [
 ]
 METRIC_SUITES = [('swipe_', 'perf'), ('setup_page_', 'navigation'), ('easy_connect_', 'navigation')]
 
-# The pager: system | stop | stop2 .. stop8 | alerts, one page per favourite (at least "stop": without favourites it
-# says how to add some). The tests read the display's favourites and swipe through all of them.
-HOME, NEXT = 'system', 'stop'
+# The main screen (v0.4.0, the user's design, 2026-10-07): a row alerts | stops | map, the stops a column (stop,
+# stop2 .. stop8, one per favourite; at least "stop": without favourites it says how to add some). Swipe up / down
+# between stops, right for the stop's alerts, left for its map; a long press opens Settings. The tests read the
+# display's favourites and go through all of them.
+HOME, NEXT = 'stop', 'stop'
 
 
-def pages(ctx):
-    """The pager's pages, left to right, for the favourites the display has now."""
+def stops(ctx):
+    """The stop pages, top to bottom, for the favourites the display has now."""
     n = len(ctx.board.api('/api/favs').get('favs', []))
-    return [HOME, NEXT] + [f'stop{i}' for i in range(2, n + 1)] + ['alerts']
+    return ['stop'] + [f'stop{i}' for i in range(2, n + 1)]
+
+
+def favs(ctx):
+    return len(ctx.board.api('/api/favs').get('favs', []))
 
 
 def go_home(ctx):
@@ -35,101 +41,187 @@ def go_home(ctx):
     time.sleep(0.5)
 
 
+def need_favs(ctx, n=1):
+    if favs(ctx) < n:
+        ctx.note(f'fewer than {n} favourite stop(s) on this board: not checked')
+        return False
+    return True
+
+
 # ---------------------------------------------------------------- navigation
 
 @test('navigation')
-def swipe_between_pages(ctx):
-    """Swipe like a person: left through every page, right back; no wrap-around at either end."""
+def stops_switch_vertically(ctx):
+    """Swipe up through every stop, down back; no wrap-around at either end (places in weather_amoled)."""
     b = ctx.board
     go_home(ctx)
-    p = pages(ctx)
-    route = ([('swipe left', x) for x in p[1:]] + [('swipe left', p[-1])] +     # the right end: bounces back
-             [('swipe right', x) for x in p[-2::-1]] + [('swipe right', HOME)])  # the left end: bounces back
+    p = stops(ctx)
+    route = ([('swipe up', x) for x in p[1:]] + [('swipe up', p[-1])] +       # the bottom: bounces back
+             [('swipe down', x) for x in p[-2::-1]] + [('swipe down', HOME)])  # the top: bounces back
     for cmd, want in route:
         b.cmd(cmd)
         time.sleep(0.8)
         b.wait_screen(want, 6)
-    ctx.note(f'{" <-> ".join(p)} by swipes, both ends bounce')
+    ctx.note(f'{" <-> ".join(p)} by vertical swipes, both ends bounce')
+
+
+@test('navigation')
+def row_alerts_stop_map(ctx):
+    """From a stop: swipe right for its alerts, left for its map; the row bounces at both ends."""
+    b = ctx.board
+    if not need_favs(ctx):
+        return
+    go_home(ctx)
+    at = len(ctx.log.lines())
+    # The swipe left on the map comes ~1 s after it opened, while its tiles may still arrive: v0.4.0-nav.4 took it
+    # for a long press there (Settings opened) when LVGL, busy redrawing the map, read the finger late
+    for cmd, want in (('swipe right', 'alerts'), ('swipe right', 'alerts'), ('swipe left', HOME),
+                      ('swipe left', 'map'), ('swipe left', 'map'), ('swipe right', HOME)):
+        b.cmd(cmd)
+        time.sleep(0.8)
+        b.wait_screen(want, 6)
+    check(not ctx.log.count(r'settings: open', start=at), 'a swipe opened Settings (taken for a long press)')
+    ctx.note('alerts <- stop -> map by swipes, both ends bounce')
+
+
+@test('navigation')
+def alerts_of_this_stop(ctx):
+    """The alerts page is the stop's: after moving to another stop, swipe right shows that stop's (its route in its
+    direction), not every favourite's (before v0.4.0: one page for all)."""
+    b = ctx.board
+    if not need_favs(ctx, 2):
+        return
+    seen = []
+    for i, name in enumerate(stops(ctx)[:2]):
+        b.show(name)
+        b.wait_screen(name, 6)
+        time.sleep(1)
+        b.cmd('swipe right')
+        b.wait_screen('alerts', 6)
+        lines = [l for l in ctx.log.lines() if 'ui: alerts of favourite' in l]
+        m = re.search(r'alerts of favourite (-?\d+): (\d+)', lines[-1] if lines else '')
+        check(m and int(m.group(1)) == i, f'{name}: the alerts page shows favourite '
+                                          f'{m.group(1) if m else "?"}, not {i}')
+        seen.append(f'{name}: {m.group(2)}')
+        b.cmd('swipe left')
+        b.wait_screen(name, 6)
+    ctx.note('alerts of ' + ', '.join(seen))
 
 
 @test('navigation')
 def quick_swipes(ctx):
     """A swipe that lands while the previous move's release animation still runs is a swipe too. LVGL reads nothing
     during a move, so slide.c's read hook never saw the first press end, and took the second for it: nothing moved
-    (LESSONS L181). 'swipe left right' leaves 150 ms of "up" between the two
+    (LESSONS L181). 'swipe right left' leaves 150 ms of "up" between the two
     (70 ms was sometimes read as one of the chip's brief false "ups": one drag, left then right)."""
     b = ctx.board
+    if not need_favs(ctx):
+        return
     go_home(ctx)
     at = len(ctx.log.lines())
-    b.cmd('swipe left right')
+    b.cmd('swipe right left')
     time.sleep(1.0)
     drags = [l for l in ctx.log.lines()[at:] if 'slide: drag: first frame' in l]
     check(len(drags) == 2, f'two quick swipes made {len(drags)} drag(s); the second was taken for the first')
     # Where the second one ends is timing: it starts when the first's release animation ends, by then the simulated
     # finger has mostly moved on ("samples 1", "back" once on v0.1.1-rc.1, on to the other page in the run before)
     second = 'back' if ' back |' in drags[1] else 'on'
-    check(not ctx.log.count(r'ui: map of favourite', start=at), 'a quick swipe opened the map (read as a tap)')
     ctx.note(f'two swipes 150 ms apart: 2 drags, the second went {second}; now on {b.screen()}')
     go_home(ctx)
 
 
 @test('navigation')
-def long_press_opens_setup(ctx):
-    """A long-press opens Wi-Fi setup; a tap closes it, back where it was."""
+def tap_on_stop_does_nothing(ctx):
+    """A tap on a stop does nothing (the map is a swipe left; before v0.4.0 a tap opened it)."""
     b = ctx.board
-    if 'setup' not in CFG['screens']:
-        ctx.note('no "setup" screen in forge.json: not checked')
+    if not need_favs(ctx):
         return
     go_home(ctx)
-    b.press()
-    b.wait_screen('setup', 6)
-    time.sleep(1)                                      # a tap within the long-press's own release window is ignored
+    at = len(ctx.log.lines())
     b.tap()
-    b.wait_screen(HOME, 6)
-    ctx.note(f'long-press at {SCREEN_C}: setup; tap: back to {HOME}')
+    time.sleep(1.5)
+    check(b.screen() == HOME, f'a tap on the stop went to {b.screen()}')
+    check(not ctx.log.count(r'ui: map of favourite', start=at), 'a tap opened the map')
+    ctx.note('tap on a stop: still on it, no map')
 
 
 @test('navigation')
-def tap_opens_map(ctx):
-    """A tap on a stop page opens its map: the street map's tiles arrive, the route's buses are asked for every 20 s
-    while it is open and not after; a tap closes it (user's request, 2026-10-07)."""
+def long_press_opens_settings(ctx):
+    """A long press opens Settings (online); Done goes back, and so does a swipe right (weather_amoled's)."""
     b = ctx.board
-    if not ctx.board.api('/api/favs').get('favs'):
-        ctx.note('no favourite stop on this board: not checked')
+    go_home(ctx)
+    for close, how in ((lambda: b.tap(SCREEN_C[0], 42), 'Done'), (lambda: b.cmd('swipe right'), 'a swipe right')):
+        b.press()
+        b.wait_screen('settings', 6)
+        time.sleep(1)                                  # its slide up, and the long-press's own release
+        close()
+        b.wait_screen(HOME, 6)
+        time.sleep(0.5)
+    ctx.note(f'long-press at {SCREEN_C}: Settings; Done and a swipe right: back to {HOME}')
+
+
+@test('navigation')
+def settings_rows(ctx):
+    """A Settings row acts through the same setting as the phone's page: a tap on "Dim when quiet" (the first row, under
+    the SCREEN title: list at y 70, title 22 px, 6 px gap, a 52 px row) switches dimming, and the page sees it."""
+    b = ctx.board
+    saved = b.api('/api/presence')
+    try:
+        go_home(ctx)
+        b.press()
+        b.wait_screen('settings', 6)
+        time.sleep(1)
+        at = len(ctx.log.lines())
+        b.tap(SCREEN_C[0], 70 + 22 + 6 + 26)
+        ctx.log.wait(r'settings: row 1\b', 4, 'the "Dim when quiet" row tapped', start=at)
+        time.sleep(0.5)
+        now = b.api('/api/presence')
+        check(now['enabled'] != saved['enabled'], f'dimming still {saved["enabled"]} after a tap on its row')
+        b.tap(SCREEN_C[0], 42)
+        b.wait_screen(HOME, 6)
+    finally:
+        keys = ('enabled', 'margin_db', 'wake_s', 'dim_s', 'off_s', 'bright_pct', 'dim_pct', 'motion_wake')
+        b.api('/api/presence', {k: saved[k] for k in keys if k in saved})
+    ctx.note(f'a tap on "Dim when quiet" switched dimming {"off" if saved["enabled"] else "on"} (the page saw it); '
+             'put back')
+
+
+@test('navigation')
+def swipe_left_opens_map(ctx):
+    """Swipe left from a stop: its map, the street map's tiles arrive, the route's buses are asked for every 20 s while
+    it is on view and not after; swipe right goes back (user's request, 2026-10-07)."""
+    b = ctx.board
+    if not need_favs(ctx):
         return
-    b.show(NEXT)
-    b.wait_screen(NEXT, 6)
-    time.sleep(1)
+    go_home(ctx)
     at = len(ctx.log.lines())
-    b.tap()
+    b.cmd('swipe left')
     b.wait_screen('map', 6)
+    ctx.log.wait(r'ui: map of favourite 0', 5, 'the map of the stop on view', start=at)
     # The tiles: downloaded at the first opening of this run (the screens suite's, or this one), then kept
     if not ctx.log.count(r'fmap: zoom \d+ at', start=0):
         ctx.log.wait(r'fmap: zoom \d+ at', 30, 'the map tiles', start=at)
     tiles = re.findall(r'fmap: zoom \d+ at \S+: (\d+)/(\d+) tiles', '\n'.join(ctx.log.lines()))
     check(tiles and tiles[-1][0] == tiles[-1][1], f'map tiles: {tiles[-1] if tiles else "none"}')
     ctx.log.wait(r'deps: GET /ListeAutobus_Parcours', 30, 'the buses asked for', start=at)
-    b.tap()
-    b.wait_screen(NEXT, 6)
+    b.cmd('swipe right')
+    b.wait_screen(HOME, 6)
     closed = len(ctx.log.lines())
     time.sleep(25)
     n = ctx.log.count(r'deps: GET /ListeAutobus_Parcours', start=closed)
-    check(n == 0, f'{n} bus position request(s) after the map closed')
-    ctx.note('tap: map with tiles and buses; tap: back to the stop; no positions asked once closed')
+    check(n == 0, f'{n} bus position request(s) after the map was left')
+    ctx.note('swipe left: map with tiles and buses; swipe right: back to the stop; no positions asked once left')
 
 
 @test('navigation')
 def map_zoom(ctx):
     r"""On the map, swipe down zooms in and swipe up zooms out (as weather_amoled's radar; user's request, 2026-10-07):
-    each zoom's tiles arrive, the map stays open (a swipe's release is not a tap), and a tap still closes it."""
+    each zoom's tiles arrive and the map stays on view; swipe right goes back."""
     b = ctx.board
-    if not ctx.board.api('/api/favs').get('favs'):
-        ctx.note('no favourite stop on this board: not checked')
+    if not need_favs(ctx):
         return
-    b.show(NEXT)
-    b.wait_screen(NEXT, 6)
-    time.sleep(1)
-    b.tap()
+    go_home(ctx)
+    b.cmd('swipe left')
     b.wait_screen('map', 6)
     time.sleep(3)
     seen = []
@@ -139,17 +231,44 @@ def map_zoom(ctx):
         m = ctx.log.wait(r'ui: map zoom (\d+)', 5, f'{cmd}: a new zoom', start=at)
         z = int(m.group(1))
         ctx.log.wait(r'fmap: zoom %d at' % z, 30, f'zoom {z} tiles (downloaded or kept)', start=at)
-        check(b.screen() == 'map', f'{cmd} closed the map')
+        check(b.screen() == 'map', f'{cmd} left the map')
         seen.append(z)
     check(seen[1] == seen[0] - 1 and seen[2] == seen[1] - 1, f'zooms {seen}')
-    b.tap()
-    b.wait_screen(NEXT, 6)
-    ctx.note(f'zooms {seen} by swipes down, up, up; the map stayed open; a tap closed it')
+    b.cmd('swipe right')
+    b.wait_screen(HOME, 6)
+    ctx.note(f'zooms {seen} by swipes down, up, up; the map stayed; a swipe right went back')
+
+
+@test('navigation')
+def stop_on_view_every_30s_after_start(ctx):
+    """After a restart, the stop on view is fetched every 30 s without anyone touching the display. Before v0.4.0 the
+    start-up's fade into the stops told the fetcher "no stop on view" (the old screen is the active one during a fade):
+    it was fetched every 5 min, as the others, until the first swipe ("updated 5 minutes ago", the user, 2026-10-09)."""
+    b = ctx.board
+    favs_now = b.api('/api/favs').get('favs', [])
+    if not favs_now:
+        ctx.note('no favourite stop on this board: not checked')
+        return
+    f = favs_now[0]
+    stop, route, d = (str(f.get(k, '')) for k in ('stop', 'route', 'dir'))
+    b.stop_log()                                         # then a restart, as at power-on, and a new log window
+    b.start_log(40 * 60)                                 # (the harness's own length: 40 min)
+    ready = ctx.log.wait(CFG['ready_line'], 90, 'start-up', start=0)
+    t0 = time.time()
+    time.sleep(75)
+    pat = re.compile(r'deps: GET /BorneVirtuelle_ArretParcours\?noArret=%s&noParcours=%s&codeDirection=%s&' %
+                     (re.escape(stop), re.escape(route), re.escape(d)))
+    lines = ctx.log.lines()
+    at = next(i for i, l in enumerate(lines) if ready.string in l)
+    gets = [l for l in lines[at:] if pat.search(l)]
+    check(len(gets) >= 3, f'the stop on view ({route} at {stop}) was fetched {len(gets)} time(s) in the '
+                          f'{time.time() - t0:.0f} s after start-up, not every 30 s')
+    ctx.note(f'{route} at {stop}, untouched after a restart: fetched {len(gets)} times in 75 s')
 
 
 @test('navigation')
 def setup_pages_slide(ctx):
-    """Setup's two pages (setup network | Easy Connect) follow the finger like system | stop, and the Easy Connect QR
+    """Setup's two pages (setup network | Easy Connect) follow the finger like the stops, and the Easy Connect QR
     code shows up quickly. User reports, October 4: the setup pages only switched after the swipe (and froze while
     the radio switched), and the QR code took ~2 s (a channel scan the connected device doesn't need)."""
     b = ctx.board
@@ -211,15 +330,25 @@ def measure(ctx, name, action, settle=1.0):
 
 @test('perf')
 def page_swipes(ctx):
+    """The moves a person makes most: to the map and back (the row), to the next stop and back (the column, with two
+    favourites or more), and a slow drag that follows the finger."""
     b = ctx.board
     go_home(ctx)
-    measure(ctx, f'{HOME}_to_{NEXT}', ['swipe left'])
-    b.wait_screen(NEXT, 4)
-    measure(ctx, f'{NEXT}_to_{HOME}', ['swipe right'])
-    b.wait_screen(HOME, 4)
-    w, h = CFG['screen']['w'], CFG['screen']['h']        # a slow drag, finger-following, then the snap
-    measure(ctx, 'drag_slow', [f'drag {w * 3 // 4} {h // 2} {w // 4} {h // 2} 600'], settle=1.5)
-    b.wait_screen(NEXT, 4)
+    n = favs(ctx)
+    if n:
+        measure(ctx, 'stop_to_map', ['swipe left'])
+        b.wait_screen('map', 4)
+        measure(ctx, 'map_to_stop', ['swipe right'])
+        b.wait_screen(HOME, 4)
+    if n > 1:
+        measure(ctx, 'stop_to_stop2', ['swipe up'])
+        b.wait_screen('stop2', 4)
+        measure(ctx, 'stop2_to_stop', ['swipe down'])
+        b.wait_screen(HOME, 4)
+    if n:
+        w, h = CFG['screen']['w'], CFG['screen']['h']    # a slow drag, finger-following, then the snap
+        measure(ctx, 'drag_slow', [f'drag {w // 4} {h // 2} {w * 3 // 4} {h // 2} 600'], settle=1.5)
+        b.wait_screen('alerts', 4)
     go_home(ctx)
 
 
@@ -233,7 +362,7 @@ def presence_state(b):
 @test('presence')
 def dim_off_wake(ctx):
     """Short delays through the API (the user's settings put back after): ACTIVE -> DIM -> OFF on a stop page, then a
-    tap on the dark screen only wakes it: the board's press filter swallows it, so the map doesn't open (v0.3.0's
+    tap on the dark screen only wakes it: the board's press filter swallows it, so it does nothing else (v0.3.0's
     rule, now through espforge's forge_presence and board)."""
     b = ctx.board
     saved = b.api('/api/presence')
@@ -252,7 +381,7 @@ def dim_off_wake(ctx):
         state, bright, _ = presence_state(b)
         check(state == 2 and bright == 0, f'not off: state {state}, brightness {bright}')
         at = len(ctx.log.lines())
-        b.tap()                                          # on a lit stop page: opens its map
+        b.tap()
         ctx.log.wait(r'presence: touch on a dark screen', 6, 'the press filter woke it', start=at)
         time.sleep(1.5)
         state, bright, _ = presence_state(b)

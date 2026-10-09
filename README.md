@@ -94,15 +94,19 @@ docs/                           workflow, testing, releasing, lessons, protocol,
 .github/                        CI (build, tests, releases, Pages) and Dependabot
 ```
 
-## The starter app
+## On the display
 
-Two pages to swipe between, plus Wi-Fi setup on a long-press. Swipes follow the finger at ~66 fps: forge_lvgl's
-`slide.c` draws them as pictures copied straight to the panel (LVGL's own scrolling managed ~24 fps).
+Drag up and down between your stops; swipe right for the stop's alerts, left for its map (drag down or up on the map
+to zoom); touch and hold anywhere for Settings (offline: Wi-Fi setup). Moves follow the finger at ~66 fps: espforge's
+forge_lvgl draws them as pictures copied straight to the panel.
 
-- **hello**: clock and date; the place to start your own UI.
-- **system**: firmware version, Wi-Fi, address, memory, uptime, update status, and the settings page's QR code.
-- **setup** / **setup1**: Wi-Fi setup, two pages of their own pager: the setup network's QR code, and Easy Connect's
-  (a faint placeholder until the code is ready, then it fades in).
+- **stop** (one per favourite, up to 8): the route and direction, the next departure big (real time or scheduled), the
+  three after it, when it was updated, and how many alerts the route has.
+- **alerts**: the stop's route's notices in its direction, as RTC publishes them.
+- **map**: the street map around the stop, the route's path and its buses heading that way.
+- **Settings** (espforge's forge_settings): screen dimming and timing, wake on pick-up, brightness, language, the
+  settings page's QR code, Wi-Fi, updates, restart, and About (version, network, memory).
+- **setup** / **setup1**: Wi-Fi setup: the setup network's QR code, and Easy Connect's.
 
 The settings page (`https://<ip>/`) shows device info, Wi-Fi (scan and save), language (English / français) and
 updates (channel, check, install, release notes). Everything visible goes through i18n; French is Canadian French.

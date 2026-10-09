@@ -136,7 +136,7 @@ Suites. Generic ones live in `tools/harness/core_suites.py` and test the framewo
 | `wifi_runtime` | network lost while running: retries go on; setup pauses them; back online |
 | `wifi_setup` | the PC joins the setup network like a phone (DNS answers every name, the captive-portal redirect, the page loads, `/api/info` without the home network's name or address), Easy Connect on its channel with the setup network held there; `--phone` for a real scan |
 | `ota` | (on request) the installed release is confirmed and nothing was rolled back |
-| `navigation`, `perf` | the starter app's: swipes between pages (quick ones too), long-press to setup, setup pages, fps against the baseline |
+| `navigation`, `perf` | the app's (v0.4.0): stops up and down; the row alerts / stops / map and its bounces; each stop's own alerts; quick swipes; a tap on a stop does nothing; a long press opens Settings (Done, swipe right) and a row acts; the map (tiles, buses only while on view, zoom); the stop on view fetched every 30 s after a restart (it restarts the board); setup pages. Fps of stop and map, stop and stop2, a slow drag, against the baseline |
 | *app suites* | whatever `app_suites.py` registers |
 
 Reports: `tools/harness/reports/<date>/report.md` (git-ignored) with `results.json`, screenshots and the log of each

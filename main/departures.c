@@ -419,14 +419,17 @@ bool deps_get(int i, dep_entry_t *out)
 // Does notice nt concern favourite i (its route in its direction)?
 static bool concerns(const rtc_notice_t *nt, int i) { return rtc_notice_for(nt, ent[i].fav.route, ent[i].fav.dir); }
 
-int deps_alerts(dep_alert_t *out, int max, time_t *fetched, bool *failing)
+int deps_alerts(int fav, dep_alert_t *out, int max, time_t *fetched, bool *failing)
 {
     if (!mu) return 0;
     xSemaphoreTake(mu, portMAX_DELAY);
-    int n = 0;
-    time_t oldest = n_ra ? time(NULL) : 0;
+    if (fav >= n_ent) fav = n_ent;                            // no such favourite: nothing below matches it
+    int n = 0, routes_seen = 0;
+    time_t oldest = time(NULL);
     bool fail = false;
     for (int k = 0; k < n_ra; k++) {
+        if (fav >= 0 && (fav == n_ent || strcmp(ra[k].route, ent[fav].fav.route))) continue;   // another route's
+        routes_seen++;
         if (!ra[k].fetched) oldest = 0;
         else if (oldest && ra[k].fetched < oldest) oldest = ra[k].fetched;
         fail |= ra[k].failing;
@@ -436,7 +439,7 @@ int deps_alerts(dep_alert_t *out, int max, time_t *fetched, bool *failing)
             for (int d = 0; d < n && dup < 0; d++) if (!strcmp(out[d].n.id, nt->id)) dup = d;
             char routes[40] = "";                             // the favourite routes it concerns
             for (int i = 0; i < n_ent; i++) {
-                if (!concerns(nt, i) || strstr(routes, ent[i].fav.route)) continue;
+                if ((fav >= 0 && i != fav) || !concerns(nt, i) || strstr(routes, ent[i].fav.route)) continue;
                 if (routes[0]) strlcat(routes, "  ", sizeof(routes));
                 strlcat(routes, ent[i].fav.route, sizeof(routes));
             }
@@ -458,7 +461,7 @@ int deps_alerts(dep_alert_t *out, int max, time_t *fetched, bool *failing)
             out[b] = out[b - 1];
             out[b - 1] = t;
         }
-    if (fetched) *fetched = oldest;
+    if (fetched) *fetched = routes_seen ? oldest : 0;
     if (failing) *failing = fail;
     return n;
 }

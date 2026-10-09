@@ -8,6 +8,12 @@ How to write an entry: add a `## vX.Y.Z - YYYY-MM-DD` section at the top **befor
 `- ` line per change, written for the person holding the display. Release candidates get their own
 `## vX.Y.Z-rc.N - YYYY-MM-DD` section, shown only to Beta users; the final release's section lists everything again.
 
+## v0.4.0-rc.1 - 2026-10-09
+- New way around, as on the weather display: drag up and down between your stops (dots on the right show which one); swipe right for that stop's alerts (only its route and direction); swipe left for its map. A tap on a stop no longer opens the map.
+- Touch and hold opens Settings on the display: dimming and its timing, wake on pick-up, brightness (the arc along the bottom), language, your stops on the phone (a code to scan), Wi-Fi, updates and restart. What the system page showed (version, network, memory) is in its About section.
+- Fixed: after the display started, the stop on view sometimes said it was updated 5 minutes ago; it now refreshes every 30 seconds from the start.
+- The map answers swipes right away, even while it is still loading.
+
 ## v0.3.3 - 2026-10-08
 - Behind the scenes: the street map now comes from espforge (v0.4.0's forge_map, shared with other displays); it looks and works as before.
 

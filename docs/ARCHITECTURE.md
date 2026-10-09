@@ -31,12 +31,23 @@ locking rule for LVGL calls from outside the LVGL task. -->
 
 ## Screens
 
-One pager (`ui.c`, forge_lvgl's pager with slide.c drags): **system** (page 0) | **stop** (page 1) | the other
-favourites (**stop2**..**stop8**) | **alerts** (last). It holds 2 + `FAVS_MAX` (8) pages, built once;
-`pager_set_order()` (added to forge_lvgl on 2026-10-07, on top of `pager_set_count()`) shows system, max(1,
-favourites) stop pages and the alerts page, the others hidden after them, so a swipe never reaches an unused page.
-Stop pages are found by their object (`sp[i].page`), not by index. The display opens on the
-first stop; swipe right for the system page. Long-press anywhere: Wi-Fi setup (espforge).
+Since v0.4.0 (the user's design, 2026-10-07, as weather_amoled's places): the main screen is a **row** of three
+pages, **alerts | stops | map**, and the middle one holds a **column** of stop pages, **stop** (the first favourite),
+**stop2**..**stop8**. Drag up and down between stops, right for the stop's alerts, left for its map; a long press
+anywhere opens **Settings** (offline: Wi-Fi setup). Both pagers are forge_lvgl's (`row` horizontal, `stops`
+vertical on the row's middle page) with slide.c drags: espforge v0.5.0 lets a pager sit on a page of another, each
+axis dragging its own (`pager_on_view`), with four neighbour pictures kept ready (the stop above and below, the alerts
+and the map). The column has `FAVS_MAX` (8) pages built once, `pager_set_count()` shows as many as there are
+favourites (at least one: it says how to add some); without favourites the row shows only the stops (no alerts or map
+to show). The display opens on the first stop. Dots on each page: the stops down the right edge, the row along the
+bottom (this page's dot is the long one). A tap on a stop does nothing (v0.3: it opened the map).
+
+The row and the column are "about" the stop on view (`fav_on_view()`): when the column settles on another stop
+(`stop_settled`) its alerts page and its map page change to that stop, and `slide_stale()` drops the pictures kept of
+the old ones. The departures of the stop on view are fetched every 30 s (`deps_show(fav_fetched())`, on the stops and
+on the map, not on the alerts); the 1 s `tick` re-tells departures.c whenever that changes, so a screen that faded in
+(`lv_screen_active()` is still the old one during a fade) can't leave it wrong: before v0.4.0 the start-up's fade said
+"no stop on view" and the stop on view was fetched every 5 min until the first swipe ("updated 5 minutes ago").
 
 - **stop pages** (`stop_create` / `stop_refresh`): clock at the top; the route number on an accent badge; the
   direction; stop name and number; the next departure big ("5 min", "< 1 min", or the time itself when an hour or
@@ -45,36 +56,44 @@ first stop; swipe right for the system page. Long-press anywhere: Wi-Fi setup (e
   older than 2 min), "Route 800 doesn't stop here in this direction" (RTC said 404), "Stop not served for now",
   "Drop-off only". Minutes count down from the departure times every second between fetches; a departure gone for
   30 s disappears; data older than 10 min shows "--" rather than times that may be wrong.
-- **stop without favourites**: page 1 says to add stops on the settings page (swipe right, scan the code).
+- **stop without favourites**: the first stop page says to add stops from the phone (touch and hold, then "Stops on
+  phone").
 - **stop pages' alert line** (orange, y 392): "1 alert for this route" / "N alerts..." when a notice names the
-  favourite's route in its direction (`deps_alerts_for`).
-- **alerts** (`alerts_create` / `alerts_refresh`): RTC's notices for the favourite routes in their directions,
-  deduplicated, urgent first then newest, at most 12: the favourite routes concerned on a badge, the title (orange
-  when RTC marks it urgent) and subtitle, "Start: ..." / "End: ..." as RTC writes them (French: RTC publishes its
-  notices in French only). A list that scrolls up and down (sideways is the pager's); rebuilt only when the notices
-  or the language change (a signature of their ids). Status line: "Updated at", or "Can't reach the RTC" after 30 min
-  of failures. Empty: "No alerts for your routes".
-- **map** (its own screen, `map_create` / `map_refresh` in ui.c, tiles in map.c): a tap on a stop page opens it,
-  a tap anywhere closes it, and it closes by itself after 5 min without a touch. Swipe down to zoom in, up to zoom
-  out (weather_amoled's radar gesture; the swipe's release waits, so it isn't also a tap), zoom 13 (~6 km across) to
-  17 (~370 m), 15 (~1.5 km) at first, the last one kept while the device runs; until a new zoom's tiles are all
-  there the previous picture stays on view, scaled about the stop (`lv_image_set_scale`), while the path and buses
-  already use the new zoom. OpenStreetMap tiles centred on the stop (its latitude/longitude from the departures reply), dimmed as
-  weather_amoled's radar (`dim_map`), as an RGB565 `lv_image` in PSRAM; the route's path in the favourite's
-  direction as blue `lv_line`s (one per variant, a point within 3 px of the last one drawn skipped: 739 points for
-  route 800 to ~200 on screen), under everything else; the stop a blue dot in a white ring; the route's buses in the
-  favourite's direction as small bus icons built from LVGL objects (green body, dark outline and windshield,
-  headlights: the fonts have no bus), only those within 220 px of the centre (user, 2026-10-07: a bus beyond the
-  round map isn't shown; v0.2.x first put it on the edge, off its path, which looked wrong); top: route and direction; bottom: "Next bus: 5 min" or what's wrong; "©
-  OpenStreetMap" under it (the licence). A tap within 600 ms of a page settling (or during a slide) is not a tap: a
-  second quick swipe's press reached LVGL as one and opened the map (harness quick_swipes, 2026-10-07). The tick
-  that stops a map left by another path ignores the map's first 500 ms: during its 200 ms fade-in
-  `lv_screen_active()` is still the stop page, and v0.2.0 sometimes closed the map's tracking as it opened (no
-  buses, no zoom; harness map_zoom).
-- **system**: espforge's page (version, Wi-Fi, address, memory, uptime, updates, settings QR code).
+  favourite's route in its direction (`deps_alerts_for`): swipe right for them.
+- **alerts** (`alerts_create` / `alerts_refresh`): the stop on view's notices only (`deps_alerts(fav, ...)`: its
+  route in its direction; v0.3 listed every favourite's), urgent first then newest, at most 12: the title "Alerts:
+  800", each notice's title (orange when RTC marks it urgent) and subtitle, "Start: ..." / "End: ..." as RTC writes
+  them (French: RTC publishes its notices in French only). A list that scrolls up and down (sideways is the row's);
+  rebuilt only when the stop, the notices or the language change (a signature). Status line: "Updated at", or
+  "Can't reach the RTC" after 30 min of failures. Empty: "No alerts for this route". Log: `ui: alerts of favourite
+  N: M` (the harness's `alerts_of_this_stop` reads it).
+- **map** (`map_create` / `map_refresh`): the stop on view's. The page follows the stop at once (`map_prepare`: its
+  title, its picture hidden); the picture, the path and the buses only once the map is on view (`map_open` from
+  `row_settled`: tiles and bus positions are fetched only for a map someone looks at), and its buses stop when it is
+  left (`map_leave`). Swipe down to zoom in, up to zoom out (weather_amoled's radar gesture: vertical swipes on the map
+  are LVGL gestures, no pager goes that way there), zoom 13 (~6 km across) to 17 (~370 m), 15 (~1.5 km) at first, the
+  last one kept while the device runs; until a new zoom's tiles are all there the previous picture stays on view,
+  scaled about the stop, while the buses already use the new zoom. After 5 min on the map without a touch it goes back
+  to the stop. OpenStreetMap tiles centred on the stop (espforge's forge_map), dimmed; **the picture and the route's
+  path are one canvas** (`map_compose`: the picture copied into `mp_buf`, the path drawn over it with `lv_draw_line`,
+  a point within 3 px of the last one skipped), redrawn only when the picture, the zoom or the path changes, at most
+  once a second while tiles arrive, and not while a finger is down: as an image under two `lv_line`s (~700 points)
+  every frame of the map page took 170-200 ms, LVGL read the touch too seldom, and a swipe there was lost or became a
+  long press (v0.4.0-nav.4/5). The stop a blue dot in a white ring; the route's buses as small bus icons, only those
+  within 220 px of the centre (user, 2026-10-07); top: route and direction; bottom: "Next bus: 5 min" or what's
+  wrong; "© OpenStreetMap" under it (the licence).
+- **Settings** (espforge's forge_settings, `settings_make` in ui.c): a long press on the main screen, only with a
+  finger that stayed within 24 px (LVGL fires a long press for a press held 400 ms however far it moved). Screen
+  (dim when quiet, wake on pick-up, timing Short / Normal / Long / Custom, brightness on the arc), Language, More
+  ("Stops on phone": the settings page's QR code; Wi-Fi network: setup, back to Settings when it closes; Updates;
+  Restart), About (version, network, IP address, memory, running time: what v0.3's system page showed). Done or a
+  swipe right goes back. The stops, the noise measurement and custom timings stay on the phone.
 
-Every second the `tick` timer refreshes every stop page, the ones not shown too (a swipe shows a neighbour's picture
-rendered in the background); `set_text` / `set_color` change a label only when it differs.
+Every second the `tick` timer refreshes every stop page, the alerts and the map, the ones not shown too (a drag shows
+a neighbour's picture rendered in the background); `set_text` / `set_color` change a label only when it differs.
+Code a test console command reaches (`screen stop2` runs `go_stop()` in the console task, 4 KB of stack) keeps
+departures boards off the stack (`static`, under the display lock): v0.4.0-nav.1 overflowed it (espforge LESSONS
+L197).
 
 ## Screen dimming
 
