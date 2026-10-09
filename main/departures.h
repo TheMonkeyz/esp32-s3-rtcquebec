@@ -43,9 +43,10 @@ void deps_set_favs(const rtc_fav_t *favs, int n);   // replaces the list; the ne
 void deps_show(int i);                              // the favourite on view (-1: none); fetched now if due
 bool deps_get(int i, dep_entry_t *out);
 
-// The alerts for the favourites, urgent first then newest, without duplicates; returns how many. fetched: the oldest
-// route's last good fetch (0: not every route fetched yet); failing: the last try of some route failed.
-int deps_alerts(dep_alert_t *out, int max, time_t *fetched, bool *failing);
+// The alerts for favourite fav (its route in its direction; -1: every favourite), urgent first then newest, without
+// duplicates; returns how many. fetched: the oldest of those routes' last good fetch (0: not all fetched yet);
+// failing: the last try of one of them failed.
+int deps_alerts(int fav, dep_alert_t *out, int max, time_t *fetched, bool *failing);
 int deps_alerts_for(int i);                         // how many concern favourite i
 
 // The map: favourite i's route's buses in its direction, every DEPS_BUSES_S while tracked (-1: stop)

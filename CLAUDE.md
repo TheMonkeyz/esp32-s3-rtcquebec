@@ -103,10 +103,29 @@ docs/ARCHITECTURE.md "Data sources" for its endpoints and polling rules. Never p
 
 Number them; one entry per bug: symptom, cause, fix, the test that guards it. General lessons go to docs/LESSONS.md.
 
+1. **"Updated 5 minutes ago" on the stop on view** (the user, 2026-10-09; since v0.1). Cause: the stop fetched every
+   30 s was told only when a page settled or a screen loaded; `ui_home()` at start-up fades in, and during a fade
+   `lv_screen_active()` is still the old screen, so it said "no stop on view": every 5 min, as the others, until the
+   first swipe. Fix (v0.4.0): the 1 s tick re-tells it whenever it changes. Test: harness
+   `navigation.stop_on_view_every_30s_after_start` (1 fetch in 75 s on v0.3.x, 3 now).
+2. **A swipe on the map lost, or taken for a long press (Settings opened)** (v0.4.0-nav.4/5, harness). Cause: the map
+   page took 170-200 ms a frame (an image under two 700-point `lv_line`s), so LVGL read the touch too seldom; LVGL fires
+   a long press for a press held 400 ms however far it moved. Fix: the map's picture and path in one canvas, no map
+   redraw while a finger is down, a long press only for a finger that stayed within 24 px. Test: harness
+   `row_alerts_stop_map` (swipes on the map right after it opens; no "settings: open") and `perf.page_swipes`.
+3. **Stack overflow in the test console's task on `screen stop2`** (v0.4.0-nav.1, harness). Cause: the page refresh it
+   runs held whole departures boards on the 4 KB stack. Fix: `static`, under the display lock (espforge L197). Test:
+   harness `alerts_of_this_stop`.
 ## User preferences learned
 
 Add each preference the user states (gestures, wording, timing, look) with the date, in their words when possible.
 
+- **Navigation like weather_amoled** (2026-10-07): "Switching between stops should be done like the places switching
+  in the other app: vertical drags/swipes. Swiping left should show the map. Touch and hold on a stop should bring up
+  a settings screen, with all of the pertinent options from the weather project." Swipe right: "alerts only for that
+  stop". The system page went into Settings (About); a tap on a stop does nothing.
+- **Settings shared in espforge** (2026-10-07): "maybe the whole settings screen should be standardized in the
+  espforge project for current and future projects" (forge_settings, espforge v0.5.0).
 ## Useful facts
 
 Board facts, API quirks, numbers measured on this hardware, test recipes: anything a future session would otherwise
@@ -126,4 +145,15 @@ rediscover.
   Microsoft Store Python, which hides AppData\Local from its child processes (L146), so without the copy its webtest
   step fails every test in ~1 ms ("Executable doesn't exist") while `npm test` by hand passes.
 - **Screen names**: `stop` is the first favourite, `stop2`..`stop8` the others (registered only for pages in use);
-  the harness's navigation test reads `/api/favs` and swipes through all of them.
+  `alerts` and `map` are the stop on view's; `settings`, `settings1`, `settings2` (the list scrolled down, snapshots
+  only). The harness's navigation test reads `/api/favs` and goes through all of them (v0.4.0: up and down).
+- **Building from the Claude desktop app's shell** (2026-10-09): it runs inside the app's package, which redirects
+  `AppData\Local` to `Packages\Claude_...\LocalCache`; the component manager's git cache then fails ("'git init
+  --bare' failed ... unable to get current working directory") on a build that fetches espforge at a new tag. Set
+  `$env:IDF_COMPONENT_CACHE_PATH="C:\Users\lmathieu\.espressif\component_cache"` before `idf.py` (L146's trap again).
+- **A build against an unreleased espforge**: `python tools/forge_local.py` (build/forge), then
+  `python tools/harness/harness.py --flash build/forge` (the helpers and the harness follow the staged folder since
+  espforge v0.5.0).
+- **The map page's cost** (v0.4.0): picture and path are one canvas (`map_compose`); as an image under `lv_line`s a
+  frame took 170-200 ms and swipes on the map were lost. Anything drawn on the map that changes often goes in the
+  canvas or is a small object.

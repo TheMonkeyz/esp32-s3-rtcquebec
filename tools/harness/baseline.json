@@ -1,5 +1,5 @@
 {
- "_comment": "Limits for tools/harness/harness.py (compare()): 'max' = higher is worse, 'min' = lower is worse; 'ref' = measured on the board. First baseline: one full run of v0.1.0-deps.5 on the Waveshare AMOLED 1.75 with 3 favourite stops, 2026-10-06 (limits proposed by --update-baseline, not yet checked over several runs: widen one that trips without a real change). stop_to_system is slower than system_to_stop (40 vs 61 fps, a 195 ms LVGL redraw after the move): an open thread in docs/HISTORY.md. After a deliberate change: --update-baseline, review, copy.",
+ "_comment": "Limits for tools/harness/harness.py (compare()): 'max' = higher is worse, 'min' = lower is worse; 'ref' = measured on the board. First baseline: one full run of v0.1.0-deps.5 on the Waveshare AMOLED 1.75 with 3 favourite stops, 2026-10-06 (limits proposed by --update-baseline, not yet checked over several runs: widen one that trips without a real change). After a deliberate change: --update-baseline, review, copy.",
  "boot_s.ready": {
   "max": 7.1,
   "note": "first run",
@@ -60,6 +60,31 @@
   "note": "first run",
   "ref": 67
  },
+ "snapshot_ms.alerts": {
+  "max": 1915.2,
+  "note": "first run (v0.2.0-map.2, 2026-10-07)",
+  "ref": 1368
+ },
+ "snapshot_ms.map": {
+  "max": 2291.8,
+  "note": "first run (v0.2.0-map.2, 2026-10-07)",
+  "ref": 1637
+ },
+ "snapshot_ms.settings": {
+  "max": 2319,
+  "ref": 1546,
+  "note": "v0.4.0-nav.3, one run (Settings: forge_settings)"
+ },
+ "snapshot_ms.settings1": {
+  "max": 2734,
+  "ref": 1823,
+  "note": "v0.4.0-nav.3, one run (Settings: forge_settings)"
+ },
+ "snapshot_ms.settings2": {
+  "max": 2379,
+  "ref": 1586,
+  "note": "v0.4.0-nav.3, one run (Settings: forge_settings)"
+ },
  "snapshot_ms.setup": {
   "max": 1857.8,
   "note": "first run",
@@ -75,64 +100,79 @@
   "note": "first run",
   "ref": 1842
  },
- "snapshot_ms.system": {
-  "max": 1951.6,
-  "note": "first run",
-  "ref": 1394
- },
  "swipe_fps.drag_slow": {
   "min": 47.0,
   "note": "first run",
   "ref": 62.6
  },
- "swipe_fps.stop_to_system": {
-  "min": 30.4,
-  "note": "first run",
-  "ref": 40.5
+ "swipe_fps.map_to_stop": {
+  "min": 43.8,
+  "ref": 54.7,
+  "note": "v0.4.0-nav.3 (alerts | stops | map, the stops a column), one run: 67-70 fps in the drag itself, the gap is LVGL redrawing the page after it lands"
  },
- "swipe_fps.system_to_stop": {
-  "min": 45.5,
-  "note": "first run",
-  "ref": 60.6
+ "swipe_fps.stop2_to_stop": {
+  "min": 44.4,
+  "ref": 55.5,
+  "note": "v0.4.0-nav.3 (alerts | stops | map, the stops a column), one run: 67-70 fps in the drag itself, the gap is LVGL redrawing the page after it lands"
+ },
+ "swipe_fps.stop_to_map": {
+  "min": 41.0,
+  "ref": 51.2,
+  "note": "v0.4.0-nav.3 (alerts | stops | map, the stops a column), one run: 67-70 fps in the drag itself, the gap is LVGL redrawing the page after it lands"
+ },
+ "swipe_fps.stop_to_stop2": {
+  "min": 44.9,
+  "ref": 56.1,
+  "note": "v0.4.0-nav.3 (alerts | stops | map, the stops a column), one run: 67-70 fps in the drag itself, the gap is LVGL redrawing the page after it lands"
  },
  "swipe_gap_max_ms.drag_slow": {
   "max": 85.4,
   "note": "first run",
   "ref": 61
  },
- "swipe_gap_max_ms.stop_to_system": {
-  "max": 273.0,
-  "note": "first run",
-  "ref": 195
+ "swipe_gap_max_ms.map_to_stop": {
+  "max": 120,
+  "ref": 80,
+  "note": "v0.4.0-nav.3 (alerts | stops | map, the stops a column), one run: 67-70 fps in the drag itself, the gap is LVGL redrawing the page after it lands"
  },
- "swipe_gap_max_ms.system_to_stop": {
-  "max": 79.8,
-  "note": "first run",
-  "ref": 57
+ "swipe_gap_max_ms.stop2_to_stop": {
+  "max": 124,
+  "ref": 83,
+  "note": "v0.4.0-nav.3 (alerts | stops | map, the stops a column), one run: 67-70 fps in the drag itself, the gap is LVGL redrawing the page after it lands"
+ },
+ "swipe_gap_max_ms.stop_to_map": {
+  "max": 260,
+  "ref": 175,
+  "note": "v0.4.0-nav.6: the map composed once after the drag lands (its picture copied, the route path drawn into it: ~150 ms, once per opening); 114 before, when every frame of the map page cost 170-200 ms instead"
+ },
+ "swipe_gap_max_ms.stop_to_stop2": {
+  "max": 123,
+  "ref": 82,
+  "note": "v0.4.0-nav.3 (alerts | stops | map, the stops a column), one run: 67-70 fps in the drag itself, the gap is LVGL redrawing the page after it lands"
  },
  "swipe_render_avg_ms.drag_slow": {
   "max": 2.5,
   "ref": 0.8,
   "note": "widened from 1.1 (one run): v0.2.1-rc.1 measured 1.4 at the same fps (61.6)"
  },
- "swipe_render_avg_ms.stop_to_system": {
-  "max": 6.0,
-  "ref": 2.4,
-  "note": "widened from 3.4 (one run): v0.1.0-rc.1 measured 4.4 with better fps (49.6) and gaps (66 ms)"
+ "swipe_render_avg_ms.map_to_stop": {
+  "max": 8.0,
+  "ref": 5.2,
+  "note": "v0.4.0-nav.6/7: 1.8 to 5.3 over four runs at 53-58 fps (one slow frame in ~25 adds 3 ms: a bus position or the stop page redrawn as the move ends)"
  },
- "swipe_render_avg_ms.system_to_stop": {
-  "max": 4.0,
-  "ref": 1.6,
-  "note": "widened from 2.2 (one run): v0.2.0-map.2 measured 2.6 with the same fps"
+ "swipe_render_avg_ms.stop2_to_stop": {
+  "max": 4.1,
+  "ref": 2.1,
+  "note": "v0.4.0-nav.3 (alerts | stops | map, the stops a column), one run: 67-70 fps in the drag itself, the gap is LVGL redrawing the page after it lands"
  },
- "snapshot_ms.alerts": {
-  "max": 1915.2,
-  "note": "first run (v0.2.0-map.2, 2026-10-07)",
-  "ref": 1368
+ "swipe_render_avg_ms.stop_to_map": {
+  "max": 10.0,
+  "ref": 5.9,
+  "note": "v0.4.0-nav.3 (alerts | stops | map, the stops a column), one run: 67-70 fps in the drag itself, the gap is LVGL redrawing the page after it lands"
  },
- "snapshot_ms.map": {
-  "max": 2291.8,
-  "note": "first run (v0.2.0-map.2, 2026-10-07)",
-  "ref": 1637
+ "swipe_render_avg_ms.stop_to_stop2": {
+  "max": 4.8,
+  "ref": 2.8,
+  "note": "v0.4.0-nav.3 (alerts | stops | map, the stops a column), one run: 67-70 fps in the drag itself, the gap is LVGL redrawing the page after it lands"
  }
 }
