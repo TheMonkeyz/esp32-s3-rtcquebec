@@ -46,9 +46,9 @@
   "ref": 23
  },
  "psram_min_kb": {
-  "min": 4736.2,
-  "note": "first run",
-  "ref": 6315
+  "min": 4200,
+  "ref": 4677,
+  "note": "v0.4.0-rc.1 (installed by --ota): two more drag pictures (forge_lvgl v0.5.0, 868 KB) and the map canvas (434 KB) since v0.3.x (ref 6315)"
  },
  "reconnect_s": {
   "max": 4.3,
@@ -116,9 +116,9 @@
   "note": "v0.4.0-nav.3 (alerts | stops | map, the stops a column), one run: 67-70 fps in the drag itself, the gap is LVGL redrawing the page after it lands"
  },
  "swipe_fps.stop_to_map": {
-  "min": 41.0,
-  "ref": 51.2,
-  "note": "v0.4.0-nav.3 (alerts | stops | map, the stops a column), one run: 67-70 fps in the drag itself, the gap is LVGL redrawing the page after it lands"
+  "min": 28.0,
+  "ref": 33.1,
+  "note": "v0.4.0-rc.1: 33-46 fps over three runs; the drag itself ~68 fps, the rest is the map composed after it lands (once, and once a second while its tiles download: worst gap 197 ms, 1.75 s after the swipe, first opening after an update)"
  },
  "swipe_fps.stop_to_stop2": {
   "min": 44.9,
