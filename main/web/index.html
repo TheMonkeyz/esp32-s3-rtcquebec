@@ -353,6 +353,11 @@ async function loadFavs() {
 
 async function saveFavs(list) {
   say(t('asking'));
+  // The rows stand for the list before this save, and their buttons act on it: a Remove tapped right after a Move up,
+  // before the display's answer came back, removed the stop that used to be first (found in MeteoBus, whose page came
+  // from this one, 2026-10-10). Disabled until the new list shows; a tap waits for it.
+  const rows = [...$('fav-list').querySelectorAll('button')];
+  rows.forEach(b => b.disabled = true);
   try {
     const j = await api('/api/favs', { favs: list.map(f => ({ stop: f.stop, route: f.route, dir: f.dir })) });
     if (!j.ok) {
@@ -362,10 +367,12 @@ async function saveFavs(list) {
       return false;
     }
     say(t('saved'));
+    favs = list; showFavs();             // the new order at once, then the display's own copy
     await loadFavs();
     setTimeout(loadFavs, 4000);          // names arrive with the first fetch
     return true;
   } catch (e) { if (e.message !== 'key') say(t('failed', { e: e.message }), true); return false; }
+  finally { rows.forEach(b => b.disabled = false); }
 }
 
 $('fav-find').onclick = async () => {

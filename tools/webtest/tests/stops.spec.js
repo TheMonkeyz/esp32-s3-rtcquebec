@@ -31,6 +31,15 @@ test('reorder and remove', async ({ page, request }) => {
     await expect(page.locator('#fav-stop')).toHaveValue('');
   }
   await expect(page.locator('#fav-list .fav')).toHaveCount(2);
+  // A slow phone: the display has saved the new order, but its answer reaches the page 1.5 s later. The rows on screen
+  // are still the old order meanwhile, and a Remove tapped then removed the wrong stop (found in MeteoBus, whose page
+  // came from this one, on CI's Mac runner, 2026-10-10). The page now disables the rows during a save.
+  await page.route('**/api/favs', async route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    const response = await route.fetch();
+    await new Promise(r => setTimeout(r, 1500));
+    await route.fulfill({ response });
+  });
   await page.locator('#fav-list .fav').nth(1).getByTitle('Move up').click();
   await expect.poll(async () => (await state(request)).favs.map(f => f.stop)).toEqual(['1026', '1025']);
   await page.locator('#fav-list .fav').nth(0).getByTitle('Remove').click();
