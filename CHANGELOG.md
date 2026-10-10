@@ -8,6 +8,9 @@ How to write an entry: add a `## vX.Y.Z - YYYY-MM-DD` section at the top **befor
 `- ` line per change, written for the person holding the display. Release candidates get their own
 `## vX.Y.Z-rc.N - YYYY-MM-DD` section, shown only to Beta users; the final release's section lists everything again.
 
+## v0.4.1 - 2026-10-10
+- Fixed: on the phone's settings page, removing a stop right after moving one up could remove the wrong stop on slow Wi-Fi. The list's buttons now wait until the display has saved the change.
+
 ## v0.4.1-rc.1 - 2026-10-10
 - Fixed: on the phone's settings page, removing a stop right after moving one up could remove the wrong stop on slow Wi-Fi. The list's buttons now wait until the display has saved the change.
 
