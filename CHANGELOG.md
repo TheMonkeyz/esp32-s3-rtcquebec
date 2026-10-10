@@ -8,6 +8,9 @@ How to write an entry: add a `## vX.Y.Z - YYYY-MM-DD` section at the top **befor
 `- ` line per change, written for the person holding the display. Release candidates get their own
 `## vX.Y.Z-rc.N - YYYY-MM-DD` section, shown only to Beta users; the final release's section lists everything again.
 
+## v0.4.1-rc.1 - 2026-10-10
+- Fixed: on the phone's settings page, removing a stop right after moving one up could remove the wrong stop on slow Wi-Fi. The list's buttons now wait until the display has saved the change.
+
 ## v0.4.0 - 2026-10-09
 - New way around, as on the weather display: drag up and down between your stops (dots on the right show which one); swipe right for that stop's alerts (only its route and direction); swipe left for its map. A tap on a stop no longer opens the map.
 - Touch and hold opens Settings on the display: dimming and its timing, wake on pick-up, brightness (the arc along the bottom), language, your stops on the phone (a code to scan), Wi-Fi, updates and restart. What the system page showed (version, network, memory) is in its About section.
