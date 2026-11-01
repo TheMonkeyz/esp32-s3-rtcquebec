@@ -101,7 +101,7 @@ jobs:
           (cd build && python3 -m esptool --chip "$CHIP" merge_bin -o "../dist/$APP-$VERSION-full.bin" @flash_args)
           ls -l dist
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: firmware-${{ steps.ver.outputs.version }}
           path: dist/
@@ -120,7 +120,7 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
           npm test
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         if: always()
         with:
           name: webtest-shots
@@ -188,7 +188,7 @@ jobs:
             if [ -f "web/emu/build/$f" ]; then cp "web/emu/build/$f" emu/; fi   # emu-page.js: since v0.3.1
           done
           ls -l emu
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: emulator
           path: emu/
